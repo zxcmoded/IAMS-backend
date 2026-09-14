@@ -1,0 +1,87 @@
+namespace Iams.Domain;
+
+/// <summary>
+/// A configured, directed connection from one company (source) to another (target). Existence alone does
+/// not grant access — <see cref="IsEnabled"/> must be true (BR-TC-001/005) and a matching
+/// <see cref="CompanyConnectionScope"/> must cover the requested resource (BR-TC-003).
+/// One row per directed (source,target) pair in phase 1; multiple scopes/filters hang off it as children.
+/// </summary>
+public class CompanyConnection
+{
+    public Guid Id { get; set; }
+
+    /// <summary>Company whose users are requesting access ("A").</summary>
+    public Guid SourceCompanyId { get; set; }
+    public Company SourceCompany { get; set; } = null!;
+
+    /// <summary>Company being accessed ("B").</summary>
+    public Guid TargetCompanyId { get; set; }
+    public Company TargetCompany { get; set; } = null!;
+
+    public ConnectionType ConnectionType { get; set; }
+
+    /// <summary>Master on/off switch. A disabled connection grants nothing.</summary>
+    public bool IsEnabled { get; set; }
+
+    /// <summary>Default permission for this connection; a scope may narrow/override it.</summary>
+    public PermissionLevel PermissionLevel { get; set; }
+
+    // --- Offline-staleness / dynamic-policy support (BR-TC-007/008) ---
+
+    /// <summary>
+    /// Monotonically increasing, application-managed revision bumped on any policy-affecting change
+    /// (enable/disable, scope add/remove, permission change). Mobile stamps queued operations with the
+    /// revision they relied on; at sync the backend compares against the current value to detect staleness.
+    /// </summary>
+    public long PolicyRevision { get; set; }
+
+    /// <summary>When the current policy state took effect.</summary>
+    public DateTime EffectiveFromUtc { get; set; }
+    public DateTime? UpdatedAtUtc { get; set; }
+
+    /// <summary>SQL Server rowversion for optimistic concurrency on config edits.</summary>
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
+    public ICollection<CompanyConnectionScope> Scopes { get; set; } = new List<CompanyConnectionScope>();
+    public ICollection<CompanyConnectionFilter> Filters { get; set; } = new List<CompanyConnectionFilter>();
+}
+
+/// <summary>
+/// One granted scope within a connection. <see cref="Level"/> selects which single scope FK is populated
+/// (enforced by a check constraint). The resource's denormalized ancestry is compared directly against the
+/// populated FK to decide whether the resource falls inside this scope.
+/// </summary>
+public class CompanyConnectionScope
+{
+    public Guid Id { get; set; }
+
+    public Guid CompanyConnectionId { get; set; }
+    public CompanyConnection Connection { get; set; } = null!;
+
+    public HierarchyLevel Level { get; set; }
+
+    // Exactly one of the following is non-null, matching Level (check constraint enforced).
+    public Guid? ScopeCompanyId { get; set; }
+    public Guid? ScopeLocationId { get; set; }
+    public Guid? ScopeWarehouseId { get; set; }
+    public Guid? ScopeRackId { get; set; }
+    public Guid? ScopeBinId { get; set; }
+
+    /// <summary>
+    /// Optional per-scope permission override. Null = inherit the connection's PermissionLevel.
+    /// Present so the unresolved "permission per level vs inherited" gap is not foreclosed.
+    /// </summary>
+    public PermissionLevel? PermissionLevelOverride { get; set; }
+}
+
+/// <summary>Extensible additional filter attached to a connection (region/warehouse/category/location).</summary>
+public class CompanyConnectionFilter
+{
+    public Guid Id { get; set; }
+
+    public Guid CompanyConnectionId { get; set; }
+    public CompanyConnection Connection { get; set; } = null!;
+
+    public ConnectionFilterType FilterType { get; set; }
+    public required string FilterValue { get; set; }
+}
