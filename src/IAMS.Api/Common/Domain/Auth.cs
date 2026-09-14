@@ -91,10 +91,11 @@ public class UserSession
 /// whichever device authenticates and flips the same row back to <see cref="DeviceBindingStatus.Active"/> —
 /// it does not insert a second row, since the unique index on <see cref="UserId"/> allows only one.
 ///
-/// <see cref="RowVersion"/> is an optimistic-concurrency token (same pattern as
-/// <see cref="CompanyConnection.RowVersion"/>): re-registering a Reset row is an UPDATE, so the unique
-/// index on <see cref="UserId"/> never fires to catch two concurrent re-registrations racing the same row —
-/// the row version is what turns the loser's write into a catchable <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/>
+/// This entity's PostgreSQL <c>xmin</c> system column is configured as an optimistic-concurrency
+/// token (see <c>UserDeviceBindingConfiguration</c>, same pattern as <see cref="CompanyConnection"/>):
+/// re-registering a Reset row is an UPDATE, so the unique index on <see cref="UserId"/> never fires to
+/// catch two concurrent re-registrations racing the same row — <c>xmin</c> is what turns the loser's
+/// write into a catchable <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/>
 /// instead of a silent double-issued session.
 /// </summary>
 public class UserDeviceBinding
@@ -121,6 +122,4 @@ public class UserDeviceBinding
     /// <summary>The admin (<see cref="Domain.User.IsSystemAdmin"/>) who performed the reset.</summary>
     public Guid? ResetByUserId { get; set; }
     public User? ResetByUser { get; set; }
-
-    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 }

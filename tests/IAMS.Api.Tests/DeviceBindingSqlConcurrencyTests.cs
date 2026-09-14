@@ -15,8 +15,8 @@ using Xunit;
 namespace IAMS.Api.Tests;
 
 /// <summary>
-/// Opt-in integration tests exercising VerifyTwoFactorHandler's device-binding races against a REAL SQL
-/// Server: (1) two concurrent first-time registrations (no row exists yet), (2) two concurrent
+/// Opt-in integration tests exercising VerifyTwoFactorHandler's device-binding races against a REAL
+/// PostgreSQL instance: (1) two concurrent first-time registrations (no row exists yet), (2) two concurrent
 /// re-registrations against the SAME just-reset row (an UPDATE race has no unique index to catch it), (3) a
 /// harmless same-device double-tap/retry race, and (4) a genuinely FORCED conflict proving the match
 /// branch's catch really defers to the shared resolver instead of blindly proceeding — see that test's own
@@ -26,13 +26,19 @@ namespace IAMS.Api.Tests;
 ///
 /// Deliberately NOT run against the InMemory provider (see <c>TestSupport.TestDb</c>): InMemory does not
 /// enforce the real unique index on <see cref="UserDeviceBinding.UserId"/>, nor does it model row-level
-/// locking / RowVersion conflicts the same way, so none of these races are observable on it. Skipped unless
-/// <c>IAMS_SQL_TEST_CONN</c> is set, matching <see cref="SqlPolicyRevisionIntegrationTests"/>. To run:
-///   IAMS_SQL_TEST_CONN="Server=localhost,1433;Database=IAMS_QATest;User Id=sa;Password=...;TrustServerCertificate=True;Encrypt=False;" dotnet test
+/// locking / the `xmin`-based concurrency token the same way, so none of these races are observable on it.
+/// Skipped unless <c>IAMS_PG_TEST_CONN</c> is set, matching <see cref="SqlPolicyRevisionIntegrationTests"/>. To run:
+///   IAMS_PG_TEST_CONN="Host=localhost;Port=5432;Database=iams_qatest;Username=iams;Password=..." dotnet test
+///
+/// In the <c>"RealPostgresIntegration"</c> xUnit collection alongside <see cref="SqlPolicyRevisionIntegrationTests"/>
+/// so the two classes never run concurrently: both point at the same hardcoded database name from
+/// <c>IAMS_PG_TEST_CONN</c>, and either class's <c>EnsureDeletedAsync</c> (a Postgres <c>DROP DATABASE</c>)
+/// would otherwise race the other class's setup/queries.
 /// </summary>
+[Collection("RealPostgresIntegration")]
 public class DeviceBindingSqlConcurrencyTests
 {
-    private static string? Conn => Environment.GetEnvironmentVariable("IAMS_SQL_TEST_CONN");
+    private static string? Conn => Environment.GetEnvironmentVariable("IAMS_PG_TEST_CONN");
 
     private static readonly IOptions<JwtOptions> Options = Microsoft.Extensions.Options.Options.Create(new JwtOptions
     {
@@ -45,7 +51,7 @@ public class DeviceBindingSqlConcurrencyTests
     });
 
     private static IamsDbContext NewContext() =>
-        new(new DbContextOptionsBuilder<IamsDbContext>().UseSqlServer(Conn).Options);
+        new(new DbContextOptionsBuilder<IamsDbContext>().UseNpgsql(Conn).Options);
 
     private sealed record Seed(Guid UserId, Guid AdminId, string Token1, string Otp1, string Token2, string Otp2);
 
@@ -149,9 +155,9 @@ public class DeviceBindingSqlConcurrencyTests
     }
 
     [Fact]
-    public async Task ConcurrentFirstVerify_DifferentDevices_OneWinsOneGetsCleanMismatch_OnRealSqlServer()
+    public async Task ConcurrentFirstVerify_DifferentDevices_OneWinsOneGetsCleanMismatch_OnRealPostgres()
     {
-        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_SQL_TEST_CONN is set
+        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_PG_TEST_CONN is set
         var seed = await SeedAsync();
 
         // Two independent DbContexts against the SAME real database, exactly like two separate HTTP
@@ -160,7 +166,7 @@ public class DeviceBindingSqlConcurrencyTests
         await using var dbB = NewContext();
         var clock = new FakeClock(DateTimeOffset.UtcNow);
 
-        // Fire both "requests" at the real SQL Server at the same time — no unhandled exception must
+        // Fire both "requests" at the real database at the same time — no unhandled exception must
         // escape either call.
         var taskA = RunVerifyAsync(dbA, clock, seed.Token1, seed.Otp1, "device-A");
         var taskB = RunVerifyAsync(dbB, clock, seed.Token2, seed.Otp2, "device-B");
@@ -177,9 +183,9 @@ public class DeviceBindingSqlConcurrencyTests
     }
 
     [Fact]
-    public async Task ConcurrentReVerify_AfterAdminReset_DifferentDevices_OneWinsOneGetsCleanMismatch_OnRealSqlServer()
+    public async Task ConcurrentReVerify_AfterAdminReset_DifferentDevices_OneWinsOneGetsCleanMismatch_OnRealPostgres()
     {
-        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_SQL_TEST_CONN is set
+        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_PG_TEST_CONN is set
 
         // Start from an already-Reset row (as if an admin had just reset this user's binding) — this is the
         // UPDATE-branch race code review flagged: no unique index fires on an UPDATE, so without the
@@ -222,11 +228,12 @@ public class DeviceBindingSqlConcurrencyTests
     }
 
     [Fact]
-    public async Task ConcurrentReVerify_SameAlreadyActiveDevice_BothSucceed_OnRealSqlServer()
+    public async Task ConcurrentReVerify_SameAlreadyActiveDevice_BothSucceed_OnRealPostgres()
     {
-        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_SQL_TEST_CONN is set
+        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_PG_TEST_CONN is set
 
-        // Regression coverage for the bug code review found in the SECOND fix: adding RowVersion to guard
+        // Regression coverage for the bug code review found in the SECOND fix: adding the `xmin` concurrency
+        // token (SQL Server used a `rowversion` column here at the time) to guard
         // the reuse branch also silently subjected this THIRD path — the "device already matches" branch,
         // which only touches LastAuthenticatedAtUtc — to the same concurrency check. A completely normal
         // double-tap-Verify or client-timeout-retry for an ALREADY-bound device must never crash; both
@@ -263,9 +270,9 @@ public class DeviceBindingSqlConcurrencyTests
     }
 
     [Fact]
-    public async Task MatchBranchConflict_WinnerIsDifferentDevice_RejectsInsteadOfSilentlyProceeding_OnRealSqlServer()
+    public async Task MatchBranchConflict_WinnerIsDifferentDevice_RejectsInsteadOfSilentlyProceeding_OnRealPostgres()
     {
-        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_SQL_TEST_CONN is set
+        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_PG_TEST_CONN is set
 
         // Regression coverage for the THIRD-round finding, replacing an earlier version of this test that
         // raced two FULL handlers via Task.WhenAll. Code review instrumented that version and found the
@@ -277,7 +284,7 @@ public class DeviceBindingSqlConcurrencyTests
         //
         // This version forces the conflict deterministically instead of racing wall-clock timing:
         //   1. Pre-track the binding in the SAME DbContext the handler will use, capturing the genuinely
-        //      current RowVersion (exactly what the handler's own internal query would capture).
+        //      current `xmin` (exactly what the handler's own internal query would capture).
         //   2. A SEPARATE, fully-committed write then changes ONLY the bound device (Status stays Active,
         //      so the handler's OWN "is there an active binding" query still finds a row and takes the
         //      match branch — exactly as it would in the wild; nothing here relies on identity-map trickery
@@ -285,7 +292,7 @@ public class DeviceBindingSqlConcurrencyTests
         //      tracked instance for an already-tracked key instead of overwriting it from a fresh query).
         //   3. The real handler is invoked on that same context. It believes the presented device still
         //      matches (its own copy is stale). Its SaveChangesAsync then genuinely conflicts — not by
-        //      chance, because the actual current RowVersion has moved.
+        //      chance, because the actual current `xmin` has moved.
         // The round-3 bug and the fix are OBSERVABLY DIFFERENT on this exact sequence: buggy code proceeds
         // and issues a session regardless (200); fixed code notices the real winner is a different device
         // and rejects (403). See DeviceBindingTests.ResolveConcurrentWinnerAsync_* for direct, deterministic

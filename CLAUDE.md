@@ -1,6 +1,6 @@
 # IAMS-backend
 
-.NET / ASP.NET Core API for the Inventory and Asset Management System. C#, EF Core, SQL Server.
+.NET / ASP.NET Core API for the Inventory and Asset Management System. C#, EF Core, PostgreSQL.
 
 **Architecture: Vertical Slice Architecture.** Organize by feature, not by technical layer — no
 `Controllers/`, `Services/`, `Repositories/`, `Models/` split. Each feature slice owns its own

@@ -44,9 +44,6 @@ public class CompanyConnection
     public DateTime EffectiveFromUtc { get; set; }
     public DateTime? UpdatedAtUtc { get; set; }
 
-    /// <summary>SQL Server rowversion for optimistic concurrency on config edits (distinct from PolicyRevision).</summary>
-    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
-
     public ICollection<CompanyConnectionScope> Scopes { get; set; } = new List<CompanyConnectionScope>();
     public ICollection<CompanyConnectionFilter> Filters { get; set; } = new List<CompanyConnectionFilter>();
 }

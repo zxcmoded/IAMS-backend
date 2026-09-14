@@ -5,17 +5,20 @@ using Microsoft.EntityFrameworkCore.Metadata.Builders;
 namespace IAMS.Api.Common.Persistence.Configurations;
 
 // Conventions (see docs/schema/README.md):
-//  * GUID PKs (EF generates sequential GUIDs client-side → clustering-friendly).
+//  * GUID PKs (EF generates sequential GUIDs client-side; native `uuid` column type).
 //  * Enums persisted as strings (HasConversion<string>) + CHECK constraint domain → resilient to reordering.
-//  * Hierarchy/connection FKs use DeleteBehavior.Restrict to avoid SQL Server multiple-cascade-path errors.
-//  * CreatedAtUtc defaults to SYSUTCDATETIME() at the DB.
+//  * Hierarchy/connection FKs use DeleteBehavior.Restrict — the same denormalized-ancestry FK fan-out that
+//    caused SQL Server "multiple cascade paths" errors, kept Restrict under Postgres too for one consistent
+//    deletion story (soft-delete via IsActive), not because Postgres has the same restriction.
+//  * CreatedAtUtc defaults to now() at the DB; all "...AtUtc" DateTime properties map to `timestamptz`
+//    (see IamsDbContext.ConfigureConventions).
 
 internal static class EnumCheck
 {
     public static void AddEnumCheck<TEnum>(this EntityTypeBuilder b, string column) where TEnum : struct, Enum
     {
         var allowed = string.Join(", ", Enum.GetNames<TEnum>().Select(n => $"'{n}'"));
-        b.ToTable(t => t.HasCheckConstraint($"CK_{b.Metadata.GetTableName()}_{column}", $"[{column}] IN ({allowed})"));
+        b.ToTable(t => t.HasCheckConstraint($"CK_{b.Metadata.GetTableName()}_{column}", $"\"{column}\" IN ({allowed})"));
     }
 }
 
@@ -25,7 +28,7 @@ internal static class NodeConfig
     {
         b.HasKey(x => x.Id);
         b.Property(x => x.Name).HasMaxLength(200).IsRequired();
-        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
         b.HasIndex(x => x.TenantId);
     }
 }
@@ -38,7 +41,7 @@ public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
         b.HasKey(x => x.Id);
         b.Property(x => x.Name).HasMaxLength(200).IsRequired();
         b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
-        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
         b.AddEnumCheck<TenantKind>(nameof(Tenant.Kind));
         b.HasIndex(x => x.Kind);
     }
@@ -51,7 +54,7 @@ public class CompanyConfiguration : IEntityTypeConfiguration<Company>
         b.ToTable("Companies");
         b.HasKey(x => x.Id);
         b.Property(x => x.Name).HasMaxLength(200).IsRequired();
-        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
         b.HasOne(x => x.Tenant).WithMany(t => t.Companies)
             .HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => x.TenantId);

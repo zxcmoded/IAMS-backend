@@ -6,8 +6,8 @@ using IAMS.Api.Common.Persistence;
 using IAMS.Api.Common.Security;
 using IAMS.Api.Common.Time;
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -39,13 +39,12 @@ public class VerifyTwoFactorHandler(
     ILogger<VerifyTwoFactorHandler> logger)
 {
     /// <summary>
-    /// SQL Server error numbers for a unique-index/constraint violation (2601: duplicate key on a unique
-    /// index; 2627: duplicate key on a unique or primary-key constraint) — the ONLY failure the device-
-    /// binding insert race is expected to produce. Anything else (deadlock, connection drop, etc.) is a
-    /// real infra problem and must not be swallowed by the same handling.
+    /// PostgreSQL SQLSTATE for a unique-constraint/unique-index violation ("23505") — the ONLY failure the
+    /// device-binding insert race is expected to produce. Anything else (deadlock, connection drop, etc.)
+    /// is a real infra problem and must not be swallowed by the same handling.
     /// </summary>
     private static bool IsUniqueConstraintViolation(DbUpdateException ex) =>
-        ex.InnerException is SqlException sqlEx && sqlEx.Errors.Cast<SqlError>().Any(e => e.Number is 2601 or 2627);
+        ex.InnerException is PostgresException pgEx && pgEx.SqlState == PostgresErrorCodes.UniqueViolation;
 
     // Credentials + OTP were genuinely correct, so every rejection reachable after that point consumes the
     // challenge rather than leaving it valid for a doomed retry.
@@ -67,7 +66,7 @@ public class VerifyTwoFactorHandler(
 
     /// <summary>
     /// Shared resolution for EVERY write path in <see cref="HandleAsync"/> that can lose a concurrency race
-    /// (a unique-index violation on insert, or a RowVersion conflict on either update). Whoever calls this
+    /// (a unique-index violation on insert, or an xmin-backed concurrency conflict on either update). Whoever calls this
     /// has ALREADY detached their own failed/stale tracked entity. This re-reads whatever actually landed
     /// in the database — never trusting the caller's now-stale view — and is the ONLY place that decides
     /// the outcome of a lost race, so a future write path added to this handler cannot forget the check:
@@ -164,10 +163,11 @@ public class VerifyTwoFactorHandler(
         if (binding is not null)
         {
             // Same device re-authenticating. Flush this immediately (its own round trip) rather than
-            // deferring to SessionIssuer's SaveChangesAsync below: UserDeviceBinding.RowVersion is a
-            // concurrency token, so a concurrent write to this SAME row (a normal double-tap Verify, a
-            // client retry-after-timeout, OR an admin reset landing in this exact window) can race us here
-            // too and bump RowVersion first. On conflict we must NOT just shrug and proceed — an admin
+            // deferring to SessionIssuer's SaveChangesAsync below: this row's PostgreSQL xmin system column
+            // is configured as an optimistic-concurrency token (a shadow property, not a mapped member — see
+            // UserDeviceBindingConfiguration), so a concurrent write to this SAME row (a normal double-tap
+            // Verify, a client retry-after-timeout, OR an admin reset landing in this exact window) can race
+            // us here too and move xmin first. On conflict we must NOT just shrug and proceed — an admin
             // reset racing in is a real "access should now be denied" outcome, not a cosmetic collision —
             // so we defer to the shared resolver rather than assuming our own stale read is still true.
             binding.LastAuthenticatedAtUtc = now.UtcDateTime;
@@ -249,8 +249,8 @@ public class VerifyTwoFactorHandler(
             else
             {
                 // Reuse a Reset row. This is an UPDATE, not an INSERT, so the unique index on UserId never
-                // fires to catch a conflict. UserDeviceBinding.RowVersion is what closes that gap: without
-                // it, a naive in-memory mutate-then-save-later would let TWO concurrent verifies against
+                // fires to catch a conflict. The xmin-backed concurrency token is what closes that gap:
+                // without it, a naive in-memory mutate-then-save-later would let TWO concurrent verifies against
                 // the same just-reset row (the legit new device racing a client retry, or racing still-
                 // valid credentials from the old device) both "win" and each issue a session for a
                 // different device — defeating the entire point of the reset.
@@ -267,13 +267,13 @@ public class VerifyTwoFactorHandler(
                 {
                     // Flush now, same reasoning as the insert branch: a concurrent re-registration racing
                     // this exact row must surface HERE, as a catchable optimistic-concurrency conflict on
-                    // RowVersion, instead of silently overwriting (or being silently overwritten by) the
-                    // other request inside SessionIssuer's SaveChangesAsync later.
+                    // the xmin-backed token, instead of silently overwriting (or being silently overwritten
+                    // by) the other request inside SessionIssuer's SaveChangesAsync later.
                     await db.SaveChangesAsync(ct);
                 }
                 catch (DbUpdateConcurrencyException)
                 {
-                    // Lost the race: a concurrent request already updated this row (RowVersion moved)
+                    // Lost the race: a concurrent request already updated this row (its xmin moved)
                     // between our read and our write. Detach our stale copy — never leave a stale entity
                     // tracked — and defer to the shared resolver.
                     db.Entry(existingRow).State = EntityState.Detached;

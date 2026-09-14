@@ -54,7 +54,7 @@ public static class DependencyInjection
         });
 
         services.AddDbContext<IamsDbContext>(o =>
-            o.UseSqlServer(config.GetConnectionString("Default")));
+            o.UseNpgsql(config.GetConnectionString("Default")));
 
         services.Configure<JwtOptions>(config.GetSection(JwtOptions.SectionName));
 

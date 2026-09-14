@@ -9,12 +9,14 @@ public class CompanyConnectionConfiguration : IEntityTypeConfiguration<CompanyCo
     public void Configure(EntityTypeBuilder<CompanyConnection> b)
     {
         b.ToTable("CompanyConnections", t =>
-            t.HasCheckConstraint("CK_CompanyConnections_NoSelf", "[SourceCompanyId] <> [TargetCompanyId]"));
+            t.HasCheckConstraint("CK_CompanyConnections_NoSelf", "\"SourceCompanyId\" <> \"TargetCompanyId\""));
         b.HasKey(x => x.Id);
         b.Property(x => x.ConnectionType).HasConversion<string>().HasMaxLength(20);
         b.Property(x => x.PermissionLevel).HasConversion<string>().HasMaxLength(20);
-        b.Property(x => x.EffectiveFromUtc).HasDefaultValueSql("SYSUTCDATETIME()");
-        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Property(x => x.EffectiveFromUtc).HasDefaultValueSql("now()");
+        // Optimistic concurrency for config edits (distinct from PolicyRevision, the semantic/client-facing
+        // version) is configured on the Npgsql `xmin` system column in IamsDbContext.OnModelCreating — no
+        // rowversion equivalent exists in Postgres, and xmin needs no explicit mapped property here.
         b.AddEnumCheck<ConnectionType>(nameof(CompanyConnection.ConnectionType));
         b.AddEnumCheck<PermissionLevel>(nameof(CompanyConnection.PermissionLevel));
 
@@ -37,17 +39,17 @@ public class CompanyConnectionScopeConfiguration : IEntityTypeConfiguration<Comp
         b.ToTable("CompanyConnectionScopes", t =>
         {
             t.HasCheckConstraint("CK_ConnScope_OneTarget",
-                "(CASE WHEN [ScopeCompanyId]   IS NOT NULL THEN 1 ELSE 0 END" +
-                " + CASE WHEN [ScopeLocationId]  IS NOT NULL THEN 1 ELSE 0 END" +
-                " + CASE WHEN [ScopeWarehouseId] IS NOT NULL THEN 1 ELSE 0 END" +
-                " + CASE WHEN [ScopeRackId]      IS NOT NULL THEN 1 ELSE 0 END" +
-                " + CASE WHEN [ScopeBinId]       IS NOT NULL THEN 1 ELSE 0 END) = 1");
+                "(CASE WHEN \"ScopeCompanyId\"   IS NOT NULL THEN 1 ELSE 0 END" +
+                " + CASE WHEN \"ScopeLocationId\"  IS NOT NULL THEN 1 ELSE 0 END" +
+                " + CASE WHEN \"ScopeWarehouseId\" IS NOT NULL THEN 1 ELSE 0 END" +
+                " + CASE WHEN \"ScopeRackId\"      IS NOT NULL THEN 1 ELSE 0 END" +
+                " + CASE WHEN \"ScopeBinId\"       IS NOT NULL THEN 1 ELSE 0 END) = 1");
             t.HasCheckConstraint("CK_ConnScope_LevelMatches",
-                "([Level] = 'Company'   AND [ScopeCompanyId]   IS NOT NULL) OR" +
-                "([Level] = 'Location'  AND [ScopeLocationId]  IS NOT NULL) OR" +
-                "([Level] = 'Warehouse' AND [ScopeWarehouseId] IS NOT NULL) OR" +
-                "([Level] = 'Rack'      AND [ScopeRackId]      IS NOT NULL) OR" +
-                "([Level] = 'Bin'       AND [ScopeBinId]       IS NOT NULL)");
+                "(\"Level\" = 'Company'   AND \"ScopeCompanyId\"   IS NOT NULL) OR" +
+                "(\"Level\" = 'Location'  AND \"ScopeLocationId\"  IS NOT NULL) OR" +
+                "(\"Level\" = 'Warehouse' AND \"ScopeWarehouseId\" IS NOT NULL) OR" +
+                "(\"Level\" = 'Rack'      AND \"ScopeRackId\"      IS NOT NULL) OR" +
+                "(\"Level\" = 'Bin'       AND \"ScopeBinId\"       IS NOT NULL)");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Level).HasConversion<string>().HasMaxLength(20);
@@ -99,7 +101,7 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         b.Property(x => x.Email).HasMaxLength(320);
         b.Property(x => x.PasswordHash).HasMaxLength(512).IsRequired();
         b.Property(x => x.SecurityStamp).HasMaxLength(128).IsRequired();
-        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
         b.Property(x => x.IsSystemAdmin).HasDefaultValue(false);
         b.HasIndex(x => x.NormalizedUsername).IsUnique();
     }
@@ -158,14 +160,14 @@ public class OtpChallengeConfiguration : IEntityTypeConfiguration<OtpChallenge>
         b.Property(x => x.CodeHash).HasMaxLength(256).IsRequired();
         b.Property(x => x.Purpose).HasConversion<string>().HasMaxLength(20);
         b.Property(x => x.Channel).HasConversion<string>().HasMaxLength(20);
-        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
         b.Ignore(x => x.IsConsumed);
         b.AddEnumCheck<OtpPurpose>(nameof(OtpChallenge.Purpose));
         b.AddEnumCheck<TwoFactorChannel>(nameof(OtpChallenge.Channel));
         b.HasOne(x => x.User).WithMany()
             .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         b.HasIndex(x => x.ChallengeToken).IsUnique();
-        b.HasIndex(x => new { x.UserId, x.Purpose }).HasFilter("[ConsumedAtUtc] IS NULL");
+        b.HasIndex(x => new { x.UserId, x.Purpose }).HasFilter("\"ConsumedAtUtc\" IS NULL");
     }
 }
 
@@ -178,14 +180,14 @@ public class UserSessionConfiguration : IEntityTypeConfiguration<UserSession>
         b.Property(x => x.DeviceId).HasMaxLength(200);
         b.Property(x => x.RefreshTokenHash).HasMaxLength(256);
         b.Property(x => x.SecurityStamp).HasMaxLength(128);
-        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
+        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
         b.HasOne(x => x.User).WithMany(u => u.Sessions)
             .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         b.HasOne(x => x.ActiveCompany).WithMany()
             .HasForeignKey(x => x.ActiveCompanyId).OnDelete(DeleteBehavior.Restrict);
         b.HasOne(x => x.ActiveLocation).WithMany()
             .HasForeignKey(x => x.ActiveLocationId).OnDelete(DeleteBehavior.Restrict);
-        b.HasIndex(x => x.UserId).HasFilter("[RevokedAtUtc] IS NULL");
+        b.HasIndex(x => x.UserId).HasFilter("\"RevokedAtUtc\" IS NULL");
         b.HasIndex(x => x.RefreshTokenHash);
     }
 }
@@ -200,8 +202,8 @@ public class UserDeviceBindingConfiguration : IEntityTypeConfiguration<UserDevic
         b.Property(x => x.DeviceType).HasMaxLength(100);
         b.Property(x => x.DeviceName).HasMaxLength(200);
         b.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
-        b.Property(x => x.RegisteredAtUtc).HasDefaultValueSql("SYSUTCDATETIME()");
-        b.Property(x => x.RowVersion).IsRowVersion();
+        b.Property(x => x.RegisteredAtUtc).HasDefaultValueSql("now()");
+        // Optimistic concurrency via Npgsql `xmin` — see IamsDbContext.OnModelCreating.
         b.AddEnumCheck<DeviceBindingStatus>(nameof(UserDeviceBinding.Status));
 
         // One binding per user, ever — a reset flips Status rather than allowing a second row.

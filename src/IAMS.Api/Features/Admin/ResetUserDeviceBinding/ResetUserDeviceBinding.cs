@@ -30,8 +30,9 @@ public class ResetUserDeviceBindingHandler(IamsDbContext db, ICurrentUser curren
 {
     /// <summary>
     /// Bounded retry count for the optimistic-concurrency loop below — matches the "detach and resolve
-    /// against fresh state" idiom used throughout VerifyTwoFactorHandler for the same
-    /// <see cref="UserDeviceBinding.RowVersion"/> token, but as a small loop rather than a single retry:
+    /// against fresh state" idiom used throughout VerifyTwoFactorHandler for the same PostgreSQL
+    /// <c>xmin</c>-backed concurrency token (a shadow property on <see cref="UserDeviceBinding"/>, configured
+    /// in <c>IamsDbContext.OnModelCreating</c>), but as a small loop rather than a single retry:
     /// an admin's revoke action is intentional and should not give up after just one unlucky overlap with a
     /// concurrent re-verify (which only ever touches LastAuthenticatedAtUtc, so it's expected to be rare and
     /// non-repeating in practice — 3 attempts is comfortably more than that needs, not a sign contention is
@@ -66,7 +67,7 @@ public class ResetUserDeviceBindingHandler(IamsDbContext db, ICurrentUser curren
             }
             catch (DbUpdateConcurrencyException) when (attempt < MaxConcurrencyAttempts)
             {
-                // UserDeviceBinding.RowVersion is a concurrency token, so a concurrent write to this exact
+                // The row's xmin-backed concurrency token moved, so a concurrent write to this exact
                 // row (most plausibly: the user's own re-verify bumping LastAuthenticatedAtUtc) can race an
                 // admin reset here too. Detach our stale copy and loop: re-read fresh state and retry — if
                 // it's still Active (the common case — a re-verify never changes Status away from Active),

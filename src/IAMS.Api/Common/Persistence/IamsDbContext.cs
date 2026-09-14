@@ -32,24 +32,34 @@ public class IamsDbContext : DbContext
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(IamsDbContext).Assembly);
 
-        // The SQL Server rowversion concurrency token isn't supported by the in-memory test provider;
-        // relax it there so tests exercise real behavior without a provider-specific false concurrency
-        // failure. Production (SQL Server) keeps optimistic concurrency on connection config edits and on
-        // device-binding writes (see UserDeviceBinding.RowVersion / VerifyTwoFactorHandler).
-        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.InMemory")
+        // Optimistic concurrency on connection config edits and device-binding writes (see
+        // VerifyTwoFactorHandler) rides Postgres's `xmin` system column, mapped as a shadow
+        // "row version" property — there's no SQL Server `rowversion` equivalent, and `xmin` only
+        // exists on the Npgsql provider, not the in-memory test provider, so it's applied
+        // conditionally here rather than in the entity configurations themselves.
+        if (Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
         {
             modelBuilder.Entity<CompanyConnection>()
-                .Property(x => x.RowVersion)
-                .IsConcurrencyToken(false)
-                .ValueGeneratedNever();
+                .Property<uint>("xmin")
+                .HasColumnName("xmin")
+                .ValueGeneratedOnAddOrUpdate()
+                .IsRowVersion();
 
             modelBuilder.Entity<UserDeviceBinding>()
-                .Property(x => x.RowVersion)
-                .IsConcurrencyToken(false)
-                .ValueGeneratedNever();
+                .Property<uint>("xmin")
+                .HasColumnName("xmin")
+                .ValueGeneratedOnAddOrUpdate()
+                .IsRowVersion();
         }
 
         base.OnModelCreating(modelBuilder);
+    }
+
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        // Project-wide "UTC only" timestamp convention (see docs/schema/README.md): every DateTime
+        // property maps to `timestamptz`, not the ambiguous `timestamp without time zone`.
+        configurationBuilder.Properties<DateTime>().HaveColumnType("timestamptz");
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)

@@ -1,9 +1,10 @@
 # IAMS Backend — Schema Design (Phase 1)
 
 **Scope:** F1 (Authentication & 2FA) and F15 (Parent/Child Tenant Connections).
-**Status:** Design + verified EF Core model. The reference model in `reference-model/` compiles against
-EF Core 10 / SQL Server and the initial migration generates cleanly (15 tables, fully reversible, no
-multiple-cascade-path errors). See [Verification](#verification).
+**Status:** Design + verified EF Core model, now targeting PostgreSQL (originally designed and verified
+against SQL Server; migrated 2026-09-14 — see [Verification](#verification)). The real model in
+`src/IAMS.Api` compiles against EF Core 10 / Npgsql and the initial migration generates cleanly
+(16 tables, fully reversible).
 
 > **2FA verify/resend flow:** `OtpChallenges.ChallengeToken` is an opaque, globally-unique token
 > returned to the client on login and echoed back on verify/resend — the client never re-sends
@@ -17,8 +18,8 @@ multiple-cascade-path errors). See [Verification](#verification).
 > the session record. Cross-tenant connection scope is resolved dynamically per request (not frozen
 > in the session) so policy changes are honored without re-issuing the session.
 
-This document establishes the SQL Server / EF Core conventions the `dotnet-backend-engineer` should
-build the persistence layer on. `initial-schema.sql` is the generated DDL for review.
+This document establishes the PostgreSQL / EF Core (Npgsql) conventions the `dotnet-backend-engineer`
+should build the persistence layer on. `initial-schema.sql` is the generated DDL for review.
 
 ---
 
@@ -78,8 +79,9 @@ spec's "resource moves to a restricted warehouse" edge case).
   rejected if no longer permitted. A queued op therefore **cannot bypass a restriction discovered at
   sync time**.
 - **`EffectiveFromUtc`** — when the current policy took effect.
-- **`RowVersion` (rowversion)** — optimistic concurrency for admin config edits (distinct concern from
-  `PolicyRevision`, which is the semantic, client-facing version).
+- **Optimistic concurrency on admin config edits** rides Postgres's `xmin` system column (mapped as a
+  shadow "row version" property in `IamsDbContext`; there is no `rowversion` column) — distinct concern
+  from `PolicyRevision`, which is the semantic, client-facing version.
 
 ### 2.5 Permission level: connection default + optional per-scope override
 `PermissionLevel` (Read/Write/Full) is required on the connection. `CompanyConnectionScopes` has a
@@ -88,22 +90,23 @@ permissions inherit down the hierarchy or are set per level, and whether a role 
 can both be resolved later without a schema change.
 
 ### 2.6 GUID primary keys
-All PKs are `uniqueidentifier`. EF Core generates **sequential** GUIDs client-side, which keeps clustered
+All PKs are `uuid`. EF Core generates **sequential** GUIDs client-side, which keeps clustered
 indexes from fragmenting. Rationale: multi-tenant isolation, safe id generation across environments, and
 forward-compatibility with offline/mobile-generated ids in later phases (F11 sync).
 
 ### 2.7 Enums as strings + CHECK constraints
-Enums persist as `nvarchar(20)` via `HasConversion<string>()`, each backed by a `CHECK … IN (…)`
+Enums persist as `character varying(20)` via `HasConversion<string>()`, each backed by a `CHECK … IN (…)`
 constraint. Strings are self-documenting in the DB and immune to the "someone reordered the enum" class
 of bug that int-backed enums invite. The CHECK makes an out-of-domain value **unrepresentable**.
 
 ### 2.8 `DeleteBehavior.Restrict` / `NoAction` across hierarchy & connections
-Because ancestry is denormalized, several FKs point at the same ancestor table, which would produce SQL
-Server "multiple cascade paths" errors under cascade. All hierarchy and connection FKs use
-`Restrict`/`NoAction`; deletion is handled via **soft-delete (`IsActive`)** and explicit application
-logic. Only genuinely user-owned children cascade (`OtpChallenges`, `UserSessions`,
-`UserCompanyMemberships`, `UserTwoFactorSettings`, `CompanyConnectionScopes`/`Filters` off their
-connection). Verified: the initial migration generates with **zero** cascade-path errors.
+Because ancestry is denormalized, several FKs point at the same ancestor table — under SQL Server this
+combination produced "multiple cascade paths" errors under cascade; Postgres doesn't have that specific
+restriction, but the schema keeps `Restrict`/`NoAction` on all hierarchy and connection FKs anyway, for
+one consistent deletion story rather than a mix of DB-cascade and soft-delete. Deletion is handled via
+**soft-delete (`IsActive`)** and explicit application logic. Only genuinely user-owned children cascade
+(`OtpChallenges`, `UserSessions`, `UserCompanyMemberships`, `UserTwoFactorSettings`,
+`CompanyConnectionScopes`/`Filters` off their connection).
 
 ---
 
@@ -157,24 +160,25 @@ table lookups. That is the entire point of the denormalized-ancestry + covering-
 
 ## 4. Conventions for `dotnet-backend-engineer`
 
-- **Target:** .NET 10 / EF Core 10 (`Microsoft.EntityFrameworkCore.SqlServer` `10.0.x`). This is what the
-  reference model is verified against; change deliberately, not by accident.
+- **Target:** .NET 10 / EF Core 10 (`Npgsql.EntityFrameworkCore.PostgreSQL` `10.0.x`). This is what the
+  real model in `src/IAMS.Api` is verified against; change deliberately, not by accident.
 - **Entities** live in the domain layer; **configuration** in `IEntityTypeConfiguration<T>` classes
   registered via `modelBuilder.ApplyConfigurationsFromAssembly(...)` — never inline in `OnModelCreating`.
 - **Enums:** `HasConversion<string>()` + `HasMaxLength(20)` + a `CHECK … IN (…)` (see the `AddEnumCheck`
-  helper in `Configurations.cs`).
-- **Timestamps:** UTC only (`…AtUtc`), `CreatedAtUtc` defaults to `SYSUTCDATETIME()` at the DB.
+  helper in `HierarchyConfigurations.cs`). Raw check-constraint/filter SQL must use Postgres
+  double-quoted identifiers (`"ColumnName"`), not SQL Server's `[ColumnName]` brackets.
+- **Timestamps:** UTC only (`…AtUtc`); every `DateTime` property maps to `timestamptz` via a
+  `ConfigureConventions` override in `IamsDbContext`, and `CreatedAtUtc` defaults to `now()` at the DB.
 - **Deletes:** `Restrict`/`NoAction` on cross-aggregate FKs; soft-delete via `IsActive`.
+- **Optimistic concurrency:** Postgres has no `rowversion` equivalent. Where SQL Server used
+  `.IsRowVersion()` on a `byte[]` column, the Postgres model instead maps the `xmin` system column as a
+  shadow `uint` "row version" property (`.Property<uint>("xmin").ValueGeneratedOnAddOrUpdate().IsRowVersion()`),
+  applied conditionally in `IamsDbContext.OnModelCreating` since `xmin` doesn't exist on the in-memory test
+  provider.
 - **Migrations:** generate with `dotnet ef migrations add <Name>` into `Persistence/Migrations`. Name them
   in PascalCase describing the change (`InitialCreate`, `AddAssetRegister`, …). Do **not** hand-edit the
   designer/snapshot files; do review the generated `Up`/`Down` SQL before committing.
 - The migration history table is `__EFMigrationsHistory` (default).
-
-### Applying it in-repo
-The reference model was verified in a throwaway project. Once the real solution/project exists, drop
-`reference-model/Domain` and `reference-model/Persistence` into the chosen projects, wire a real
-connection string / `IDesignTimeDbContextFactory`, and run `dotnet ef migrations add InitialCreate`. The
-generated migration will match `initial-schema.sql`.
 
 ---
 
@@ -182,7 +186,7 @@ generated migration will match `initial-schema.sql`.
 
 - **Initial migration on a greenfield DB:** no existing rows, so **no backfill and no
   default-value-for-new-non-null-column concerns**. Pure `CREATE`.
-- **Reversible:** the `Down` drops all 15 tables (verified). On a populated DB a rollback is destructive
+- **Reversible:** the `Down` drops all 16 tables (verified). On a populated DB a rollback is destructive
   by nature (it's the initial create) — that is expected only pre-launch.
 - **Concurrency:** greenfield create runs before any traffic, so no live-table locking concern for *this*
   migration. Future migrations that touch the hot tables (`CompanyConnections`, hierarchy) must consider
@@ -206,15 +210,22 @@ generated migration will match `initial-schema.sql`.
 
 ## 7. Verification
 
-Performed against EF Core 10 + SQL Server provider:
-- `dotnet build` — succeeds, 0 warnings.
-- `dotnet ef migrations add InitialCreate` — succeeds, **no multiple-cascade-path errors**.
-- `dotnet ef migrations script` — 15 tables; all CHECK constraints, covering indexes
-  (`CompanyConnections`, `CompanyConnectionScopes`), filtered indexes (`OtpChallenges`, `UserSessions`),
-  unique indexes, and `rowversion` present (see `initial-schema.sql`).
+Originally performed against EF Core 10 + SQL Server provider; re-verified 2026-09-14 against EF Core 10
++ Npgsql (PostgreSQL) after the engine migration:
+- `dotnet build` (whole solution, API + tests) — succeeds, 0 warnings.
+- `dotnet test` — all 59 default (non-opt-in) tests pass.
+- `dotnet ef migrations add InitialCreate` — succeeds.
+- `dotnet ef migrations script` — 16 tables; all CHECK constraints (Postgres-quoted identifiers), covering
+  indexes (`CompanyConnections`, `CompanyConnectionScopes`, via `INCLUDE`), filtered indexes
+  (`OtpChallenges`, `UserSessions`), unique indexes, `uuid` PKs, and `timestamptz` columns present (see
+  `initial-schema.sql` — regenerate it from `docs/schema/README.md`'s instructions if this doc drifts from
+  the real migration).
 - `dotnet ef migrations has-pending-model-changes` — clean (snapshot matches model).
-- `Down` drops all 15 tables — reversible.
+- `Down` drops all 16 tables — reversible.
 
-> Note: model + migration **generation** are verified. Applying against a live SQL Server
-> (`database update`) was not run — no SQL Server instance is provisioned in this environment. That step
-> belongs to QA / first real deploy.
+> Note: model + migration **generation** are verified, and a local Postgres instance is available in this
+> environment (Docker), but a live `dotnet ef database update` run was deliberately left to QA rather than
+> run directly here. The two opt-in integration test suites (`SqlPolicyRevisionIntegrationTests`,
+> `DeviceBindingSqlConcurrencyTests`, both gated behind `IAMS_PG_TEST_CONN`) are the intended way to
+> exercise a real apply + real concurrency behavior — QA / first real deploy should run those against a
+> live Postgres before this is considered fully verified end-to-end.

@@ -8,22 +8,28 @@ namespace IAMS.Api.Tests;
 
 /// <summary>
 /// Opt-in integration tests that exercise the BR-TC-007/008 PolicyRevision invariant against a REAL
-/// SQL Server (the in-memory provider can mask provider-specific ChangeTracker/transaction behavior).
-/// Added by QA to close the "never applied/verified against a live database" gap.
+/// PostgreSQL instance (the in-memory provider can mask provider-specific ChangeTracker/transaction
+/// behavior). Added by QA to close the "never applied/verified against a live database" gap.
 ///
-/// These are skipped unless <c>IAMS_SQL_TEST_CONN</c> is set to a SQL Server connection string, so the
+/// These are skipped unless <c>IAMS_PG_TEST_CONN</c> is set to a PostgreSQL connection string, so the
 /// default <c>dotnet test</c> run is unchanged. To run:
-///   IAMS_SQL_TEST_CONN="Server=localhost,1433;Database=IAMS_QATest;User Id=sa;Password=...;TrustServerCertificate=True;Encrypt=False;" dotnet test
+///   IAMS_PG_TEST_CONN="Host=localhost;Port=5432;Database=iams_qatest;Username=iams;Password=..." dotnet test
 /// Each test builds a fresh schema (EnsureDeleted + EnsureCreated) so runs are independent.
+///
+/// In the <c>"RealPostgresIntegration"</c> xUnit collection alongside <see cref="DeviceBindingSqlConcurrencyTests"/>
+/// so the two classes never run concurrently: both point at the same hardcoded database name from
+/// <c>IAMS_PG_TEST_CONN</c>, and this class's <c>EnsureDeletedAsync</c> (a Postgres <c>DROP DATABASE</c>)
+/// would otherwise race the other class's setup/queries.
 /// </summary>
+[Collection("RealPostgresIntegration")]
 public class SqlPolicyRevisionIntegrationTests
 {
-    private static string? Conn => Environment.GetEnvironmentVariable("IAMS_SQL_TEST_CONN");
+    private static string? Conn => Environment.GetEnvironmentVariable("IAMS_PG_TEST_CONN");
 
     private static IamsDbContext NewContext()
     {
         var options = new DbContextOptionsBuilder<IamsDbContext>()
-            .UseSqlServer(Conn)
+            .UseNpgsql(Conn)
             .Options;
         return new IamsDbContext(options);
     }
@@ -40,7 +46,7 @@ public class SqlPolicyRevisionIntegrationTests
         var tenantB = new Tenant { Id = Guid.NewGuid(), Name = "B", Kind = TenantKind.Child };
         var companyA = new Company { Id = Guid.NewGuid(), TenantId = tenantA.Id, Name = "A" };
         var companyB = new Company { Id = Guid.NewGuid(), TenantId = tenantB.Id, Name = "B" };
-        // A real Location + Warehouse under companyB: on a real SQL Server the scope→Warehouse FK is
+        // A real Location + Warehouse under companyB: on real PostgreSQL the scope→Warehouse FK is
         // enforced, so a scope must reference an existing node (the in-memory provider ignores this).
         var locationB = new Location { Id = Guid.NewGuid(), Name = "L", TenantId = tenantB.Id, CompanyId = companyB.Id };
         var warehouseB = new Warehouse { Id = Guid.NewGuid(), Name = "W", TenantId = tenantB.Id, LocationId = locationB.Id, CompanyId = companyB.Id };
@@ -65,9 +71,9 @@ public class SqlPolicyRevisionIntegrationTests
     }
 
     [Fact]
-    public async Task SetEnabled_BumpsPolicyRevision_OnRealSqlServer()
+    public async Task SetEnabled_BumpsPolicyRevision_OnRealPostgres()
     {
-        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_SQL_TEST_CONN is set
+        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_PG_TEST_CONN is set
         var id = (await SeedConnectionAsync()).ConnectionId;
 
         await using (var db = NewContext())
@@ -86,9 +92,9 @@ public class SqlPolicyRevisionIntegrationTests
     }
 
     [Fact]
-    public async Task SetPermissionLevel_BumpsPolicyRevision_OnRealSqlServer()
+    public async Task SetPermissionLevel_BumpsPolicyRevision_OnRealPostgres()
     {
-        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_SQL_TEST_CONN is set
+        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_PG_TEST_CONN is set
         var id = (await SeedConnectionAsync()).ConnectionId;
 
         await using (var db = NewContext())
@@ -105,9 +111,9 @@ public class SqlPolicyRevisionIntegrationTests
     }
 
     [Fact]
-    public async Task ReplaceScopes_BumpsPolicyRevisionOnce_OnRealSqlServer()
+    public async Task ReplaceScopes_BumpsPolicyRevisionOnce_OnRealPostgres()
     {
-        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_SQL_TEST_CONN is set
+        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_PG_TEST_CONN is set
         var seed = await SeedConnectionAsync();
         var id = seed.ConnectionId;
         var newWarehouse = seed.WarehouseId; // a real warehouse so the scope→Warehouse FK is satisfied
@@ -135,9 +141,9 @@ public class SqlPolicyRevisionIntegrationTests
     }
 
     [Fact]
-    public async Task NonPolicyChange_DoesNotBump_OnRealSqlServer()
+    public async Task NonPolicyChange_DoesNotBump_OnRealPostgres()
     {
-        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_SQL_TEST_CONN is set
+        if (string.IsNullOrWhiteSpace(Conn)) return; // opt-in: skipped unless IAMS_PG_TEST_CONN is set
         var id = (await SeedConnectionAsync()).ConnectionId;
 
         await using (var db = NewContext())
