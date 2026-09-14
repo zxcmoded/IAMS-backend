@@ -1,16 +1,21 @@
 # IAMS Backend — Schema Design (Phase 1)
 
-**Scope:** F1 (Authentication & 2FA) and F15 (Parent/Child Tenant Connections).
-**Status:** Design + verified EF Core model, now targeting PostgreSQL (originally designed and verified
-against SQL Server; migrated 2026-09-14 — see [Verification](#verification)). The real model in
-`src/IAMS.Api` compiles against EF Core 10 / Npgsql and the initial migration generates cleanly
-(16 tables, fully reversible).
+**Scope:** Activation Key Authentication (superseding F1's original username/password + 2FA/OTP) and
+F15 (Parent/Child Tenant Connections).
+**Status:** Design + verified EF Core model, targeting PostgreSQL. The real model in `src/IAMS.Api`
+compiles against EF Core 10 / Npgsql; `dotnet ef migrations script` (both migrations chained) generates
+cleanly and is reversible.
 
-> **2FA verify/resend flow:** `OtpChallenges.ChallengeToken` is an opaque, globally-unique token
-> returned to the client on login and echoed back on verify/resend — the client never re-sends
-> username, and the raw OTP is only sent on verify (compared against `CodeHash`). It has a **unique
-> index** (`IX_OtpChallenges_ChallengeToken`) and is the primary lookup for that flow; the
-> `(UserId, Purpose)` filtered index remains for reissue/rate-limiting.
+> **2026-09-14 — Activation Key Authentication replaced username/password + 2FA/OTP:** `OtpChallenges`,
+> `UserTwoFactorSettings`, and the old per-user `UserDeviceBindings` table were **dropped**
+> (migration `ActivationKeyAuthentication`). `Users` gained `ActivationKeyHash` (unique, SHA-256 hash of
+> the Activation Key — the only credential now), `ActivationStatus`, `ActivatedDeviceId`,
+> `ActivatedAtUtc`, `ActivationResetAtUtc`, `ActivationResetByUserId`. `Users.NormalizedUsername` and
+> `Users.PasswordHash` were dropped; `Username`/`Email` remain as display/contact-only fields. The
+> `xmin`-backed optimistic-concurrency token that used to guard `UserDeviceBindings` now guards `Users`
+> directly (see §2.4/§4). See `docs/api/activation-key-authentication.md` for the new endpoint contract;
+> `docs/api/F1-F15-auth-and-tenant-connections.md` and `docs/api/single-device-user-access.md` are
+> historical records of the superseded login/2FA/device-binding contract and are **not** updated in place.
 >
 > **Active company is per-session:** resolved from `UserSessions.ActiveCompanyId` (+ optional
 > `ActiveLocationId`), **not** a column on `User`. A user can be a member of multiple companies
@@ -29,7 +34,7 @@ should build the persistence layer on. `initial-schema.sql` is the generated DDL
 |---|---|
 | Physical hierarchy | `Tenants`, `Companies`, `Locations`, `Warehouses`, `Racks`, `Bins` |
 | Cross-tenant connections | `CompanyConnections`, `CompanyConnectionScopes`, `CompanyConnectionFilters` |
-| Identity / auth / 2FA | `Users`, `Roles`, `UserCompanyMemberships`, `UserTwoFactorSettings`, `OtpChallenges`, `UserSessions` |
+| Identity / auth | `Users` (Activation Key + device-binding fields), `Roles`, `UserCompanyMemberships`, `UserSessions` |
 
 ---
 
@@ -81,7 +86,11 @@ spec's "resource moves to a restricted warehouse" edge case).
 - **`EffectiveFromUtc`** — when the current policy took effect.
 - **Optimistic concurrency on admin config edits** rides Postgres's `xmin` system column (mapped as a
   shadow "row version" property in `IamsDbContext`; there is no `rowversion` column) — distinct concern
-  from `PolicyRevision`, which is the semantic, client-facing version.
+  from `PolicyRevision`, which is the semantic, client-facing version. The same `xmin` technique is also
+  applied to `Users` (see the 2026-09-14 callout above) to make Activation Key device-binding atomic:
+  two concurrent activation attempts on the same never-activated key are both plain UPDATEs to the same
+  row, and `xmin` turns the loser's write into a catchable concurrency conflict instead of a silent
+  double-bound key.
 
 ### 2.5 Permission level: connection default + optional per-scope override
 `PermissionLevel` (Read/Write/Full) is required on the connection. `CompanyConnectionScopes` has a
@@ -211,21 +220,36 @@ table lookups. That is the entire point of the denormalized-ancestry + covering-
 ## 7. Verification
 
 Originally performed against EF Core 10 + SQL Server provider; re-verified 2026-09-14 against EF Core 10
-+ Npgsql (PostgreSQL) after the engine migration:
++ Npgsql (PostgreSQL) after the engine migration. Re-verified again the same day after the Activation Key
+Authentication migration, and once more after a code-review pass fixed a CRITICAL migration-safety bug
+(see the callout below):
 - `dotnet build` (whole solution, API + tests) — succeeds, 0 warnings.
-- `dotnet test` — all 59 default (non-opt-in) tests pass.
-- `dotnet ef migrations add InitialCreate` — succeeds.
-- `dotnet ef migrations script` — 16 tables; all CHECK constraints (Postgres-quoted identifiers), covering
-  indexes (`CompanyConnections`, `CompanyConnectionScopes`, via `INCLUDE`), filtered indexes
-  (`OtpChallenges`, `UserSessions`), unique indexes, `uuid` PKs, and `timestamptz` columns present (see
-  `initial-schema.sql` — regenerate it from `docs/schema/README.md`'s instructions if this doc drifts from
-  the real migration).
+- `dotnet test` — all 50 default (non-opt-in) tests pass.
+- `dotnet ef migrations add ActivationKeyAuthentication` — succeeds; drops `OtpChallenges`,
+  `UserDeviceBindings`, `UserTwoFactorSettings`, adds the Activation Key/device-binding columns + `xmin`
+  onto `Users`.
 - `dotnet ef migrations has-pending-model-changes` — clean (snapshot matches model).
-- `Down` drops all 16 tables — reversible.
+- **`dotnet ef database update` run for real** against a local Postgres (`InitialCreate` then
+  `ActivationKeyAuthentication` applied in sequence) — succeeds; resulting `Users` table schema inspected
+  directly via `psql` and matches the model (unique index on `ActivationKeyHash`, `CK_Users_ActivationStatus`
+  check constraint, FK to self on `ActivationResetByUserId`).
 
-> Note: model + migration **generation** are verified, and a local Postgres instance is available in this
-> environment (Docker), but a live `dotnet ef database update` run was deliberately left to QA rather than
-> run directly here. The two opt-in integration test suites (`SqlPolicyRevisionIntegrationTests`,
-> `DeviceBindingSqlConcurrencyTests`, both gated behind `IAMS_PG_TEST_CONN`) are the intended way to
-> exercise a real apply + real concurrency behavior — QA / first real deploy should run those against a
-> live Postgres before this is considered fully verified end-to-end.
+> **Migration-safety fix (code review, same day):** the first version of `ActivationKeyAuthentication`
+> added `ActivationKeyHash`/`ActivationStatus` as `NOT NULL` with a single shared literal default (`""`)
+> in the same statement as their `UNIQUE` index / `CHECK` constraint. Reproduced live: apply
+> `InitialCreate`, insert one plain `Users` row (simulating a dev/staging/demo DB that has ever run the
+> old password/2FA schema), then `dotnet ef database update` — failed with Postgres `23514` (check
+> constraint violated by an existing row) and rolled back entirely; with ≥2 pre-existing rows it would
+> additionally have failed with `23505` on the unique index (every row sharing the same `""`). Fixed by
+> adding both columns **nullable** first, backfilling with `UPDATE` (each legacy row gets a
+> `'legacy:<its own Id>'` placeholder hash — guaranteed unique, and shaped nothing like a real 64-hex-char
+> SHA-256 hash — plus `'NotActivated'`), THEN tightening to `NOT NULL` and adding the unique
+> index/`CHECK` constraint. Re-reproduced with 1 row and again with 3 pre-existing rows after the fix —
+> both apply cleanly now.
+- `dotnet ef migrations script` — regenerated `initial-schema.sql` from both migrations chained (see that
+  file); reversible (`Down` for `ActivationKeyAuthentication` re-creates the three dropped tables and
+  restores the two dropped `Users` columns).
+- The opt-in `ActivationSqlConcurrencyTests` (replacing the old `DeviceBindingSqlConcurrencyTests`) were
+  run for real against that same local Postgres via `IAMS_PG_TEST_CONN` — all 3 scenarios (fresh-key race,
+  post-reset race, same-device double-tap) pass, proving the `xmin`-backed atomicity on `Users` actually
+  holds under real concurrent connections, not just in the InMemory-provider unit tests.

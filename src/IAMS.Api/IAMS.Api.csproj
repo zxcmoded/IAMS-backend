@@ -16,10 +16,4 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- Lets the test project call internal members directly where a race/concurrency decision can't be
-         forced deterministically through the public API alone (see VerifyTwoFactorHandler.ResolveConcurrentWinnerAsync). -->
-    <InternalsVisibleTo Include="IAMS.Api.Tests" />
-  </ItemGroup>
-
 </Project>

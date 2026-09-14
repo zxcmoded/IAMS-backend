@@ -2,16 +2,16 @@ using FluentValidation;
 using IAMS.Api.Common;
 using IAMS.Api.Common.Errors;
 
-namespace IAMS.Api.Features.Auth.ResendTwoFactor;
+namespace IAMS.Api.Features.Auth.Activate;
 
-public static class ResendTwoFactorEndpoint
+public static class ActivateEndpoint
 {
-    public static void MapResendTwoFactorEndpoint(this IEndpointRouteBuilder app)
+    public static void MapActivateEndpoint(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/api/auth/2fa/resend", async Task<IResult> (
-            ResendTwoFactorCommand command,
-            IValidator<ResendTwoFactorCommand> validator,
-            ResendTwoFactorHandler handler,
+        app.MapPost("/api/auth/activate", async Task<IResult> (
+            ActivateCommand command,
+            IValidator<ActivateCommand> validator,
+            ActivateHandler handler,
             CancellationToken ct) =>
         {
             var errors = await validator.ValidateToDictionaryAsync(command, ct);
@@ -24,7 +24,7 @@ public static class ResendTwoFactorEndpoint
         })
         .AllowAnonymous()
         .RequireRateLimiting(DependencyInjection.AuthRateLimitPolicy)
-        .WithName("ResendTwoFactor")
+        .WithName("Activate")
         .WithTags("Auth");
     }
 }

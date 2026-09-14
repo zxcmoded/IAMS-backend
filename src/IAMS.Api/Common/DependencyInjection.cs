@@ -10,12 +10,10 @@ using IAMS.Api.Common.Security;
 using IAMS.Api.Common.Time;
 using IAMS.Api.Features.Access.EvaluateAccess;
 using IAMS.Api.Features.Access.EvaluateAccessBatch;
-using IAMS.Api.Features.Admin.ResetUserDeviceBinding;
-using IAMS.Api.Features.Auth.Login;
+using IAMS.Api.Features.Admin.ResetUserActivation;
+using IAMS.Api.Features.Auth.Activate;
 using IAMS.Api.Features.Auth.Logout;
 using IAMS.Api.Features.Auth.RefreshToken;
-using IAMS.Api.Features.Auth.ResendTwoFactor;
-using IAMS.Api.Features.Auth.VerifyTwoFactor;
 using IAMS.Api.Features.Scope.GetEffectiveScope;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -77,15 +75,13 @@ public static class DependencyInjection
         services.AddScoped<ConnectionPolicyService>();
 
         // Feature handlers.
-        services.AddScoped<LoginHandler>();
-        services.AddScoped<VerifyTwoFactorHandler>();
-        services.AddScoped<ResendTwoFactorHandler>();
+        services.AddScoped<ActivateHandler>();
         services.AddScoped<RefreshTokenHandler>();
         services.AddScoped<LogoutHandler>();
         services.AddScoped<GetEffectiveScopeHandler>();
         services.AddScoped<EvaluateAccessHandler>();
         services.AddScoped<EvaluateAccessBatchHandler>();
-        services.AddScoped<ResetUserDeviceBindingHandler>();
+        services.AddScoped<ResetUserActivationHandler>();
 
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
 
@@ -141,15 +137,13 @@ public static class DependencyInjection
 
     public static IEndpointRouteBuilder MapIamsEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapLoginEndpoint();
-        app.MapVerifyTwoFactorEndpoint();
-        app.MapResendTwoFactorEndpoint();
+        app.MapActivateEndpoint();
         app.MapRefreshTokenEndpoint();
         app.MapLogoutEndpoint();
         app.MapGetEffectiveScopeEndpoint();
         app.MapEvaluateAccessEndpoint();
         app.MapEvaluateAccessBatchEndpoint();
-        app.MapResetUserDeviceBindingEndpoint();
+        app.MapResetUserActivationEndpoint();
         return app;
     }
 }

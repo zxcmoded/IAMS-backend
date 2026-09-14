@@ -50,27 +50,14 @@ public enum ConnectionFilterType
     Category = 4
 }
 
-/// <summary>Purpose of an OTP challenge. An enum so non-login OTP flows can be added without a schema change.</summary>
-public enum OtpPurpose
-{
-    Login = 1
-}
-
-/// <summary>Delivery channel for a 2FA code.</summary>
-public enum TwoFactorChannel
-{
-    Email = 1,
-    Sms = 2,
-    Authenticator = 3
-}
-
 /// <summary>
-/// State of a user's single-device binding. <see cref="Reset"/> is an admin action that clears the bound
-/// device without deleting the audit row — the next successful 2FA verify re-registers whatever device
-/// authenticates, exactly as if no binding existed.
+/// State of a user's Activation Key device binding. <see cref="NotActivated"/> covers BOTH "never
+/// activated" and "admin-reset" — both mean the key is free to bind to the next device that presents it;
+/// the reset audit fields on <see cref="User"/> are what distinguish a fresh key from a reset one, not this
+/// enum.
 /// </summary>
-public enum DeviceBindingStatus
+public enum ActivationStatus
 {
-    Active = 1,
-    Reset = 2
+    NotActivated = 1,
+    Activated = 2
 }

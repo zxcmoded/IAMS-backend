@@ -13,12 +13,4 @@ public class JwtOptions
 
     public int AccessTokenMinutes { get; set; } = 15;
     public int RefreshTokenDays { get; set; } = 30;
-
-    // 2FA challenge tuning.
-    public int TwoFactorCodeTtlSeconds { get; set; } = 300;
-    public int TwoFactorResendCooldownSeconds { get; set; } = 30;
-    public int TwoFactorMaxAttempts { get; set; } = 5;
-
-    /// <summary>Total number of resends allowed per challenge, to stop OTP-delivery spam on a held token.</summary>
-    public int TwoFactorMaxResends { get; set; } = 3;
 }

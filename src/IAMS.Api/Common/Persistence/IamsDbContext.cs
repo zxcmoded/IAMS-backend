@@ -23,20 +23,17 @@ public class IamsDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<UserCompanyMembership> UserCompanyMemberships => Set<UserCompanyMembership>();
-    public DbSet<UserTwoFactorSetting> UserTwoFactorSettings => Set<UserTwoFactorSetting>();
-    public DbSet<OtpChallenge> OtpChallenges => Set<OtpChallenge>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
-    public DbSet<UserDeviceBinding> UserDeviceBindings => Set<UserDeviceBinding>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(IamsDbContext).Assembly);
 
-        // Optimistic concurrency on connection config edits and device-binding writes (see
-        // VerifyTwoFactorHandler) rides Postgres's `xmin` system column, mapped as a shadow
-        // "row version" property — there's no SQL Server `rowversion` equivalent, and `xmin` only
-        // exists on the Npgsql provider, not the in-memory test provider, so it's applied
-        // conditionally here rather than in the entity configurations themselves.
+        // Optimistic concurrency on connection config edits and Activation Key device-binding writes (see
+        // ActivateHandler) rides Postgres's `xmin` system column, mapped as a shadow "row version"
+        // property — there's no SQL Server `rowversion` equivalent, and `xmin` only exists on the Npgsql
+        // provider, not the in-memory test provider, so it's applied conditionally here rather than in the
+        // entity configurations themselves.
         if (Database.ProviderName == "Npgsql.EntityFrameworkCore.PostgreSQL")
         {
             modelBuilder.Entity<CompanyConnection>()
@@ -45,7 +42,7 @@ public class IamsDbContext : DbContext
                 .ValueGeneratedOnAddOrUpdate()
                 .IsRowVersion();
 
-            modelBuilder.Entity<UserDeviceBinding>()
+            modelBuilder.Entity<User>()
                 .Property<uint>("xmin")
                 .HasColumnName("xmin")
                 .ValueGeneratedOnAddOrUpdate()

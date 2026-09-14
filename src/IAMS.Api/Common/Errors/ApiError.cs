@@ -11,21 +11,20 @@ namespace IAMS.Api.Common.Errors;
 public static class ErrorCodes
 {
     public const string ValidationFailed = "validation_failed";
-    public const string InvalidCredentials = "invalid_credentials";
-    public const string AccountInactive = "account_inactive";
-    public const string TwoFactorRequired = "two_factor_required";
-    public const string TwoFactorInvalid = "two_factor_invalid";
-    public const string TwoFactorExpired = "two_factor_expired";
-    public const string TwoFactorLocked = "two_factor_locked";
-    public const string ResendTooSoon = "resend_too_soon";
-    public const string ResendLimitReached = "resend_limit_reached";
     public const string SessionExpired = "session_expired";
     public const string AccessDenied = "access_denied";
     public const string NoActiveCompany = "no_active_company";
     public const string NotFound = "not_found";
 
-    /// <summary>2FA succeeded but this account is already bound to a different device (single-device access).</summary>
-    public const string DeviceMismatch = "device_already_registered";
+    /// <summary>
+    /// The presented Activation Key does not resolve to any active user. Deliberately the SAME code for
+    /// "no such key" and "key belongs to an inactive user" — distinguishing those two would leak account
+    /// state to an unauthenticated caller holding an arbitrary string.
+    /// </summary>
+    public const string ActivationKeyInvalid = "activation_key_invalid";
+
+    /// <summary>The Activation Key is valid but already bound to a device other than the one presented.</summary>
+    public const string ActivationKeyAlreadyBound = "activation_key_already_bound";
 }
 
 /// <summary>Factory helpers producing a consistent ProblemDetails shape with a machine-readable code.</summary>

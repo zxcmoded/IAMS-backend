@@ -14,7 +14,7 @@ public record IssuedSession(
 
 /// <summary>
 /// Creates a <see cref="UserSession"/> (holding the active company/location scope + hashed refresh token)
-/// and mints the matching access token. Shared by the 2FA-verify and token-refresh slices.
+/// and mints the matching access token. Shared by the activation and token-refresh slices.
 ///
 /// The session stores ONLY the active company/location — never a snapshot of connection scope. Cross-tenant
 /// connection policy is resolved live per request (see AccessCheckService / GetEffectiveScope), so a policy
@@ -35,7 +35,6 @@ public class SessionIssuer(IamsDbContext db, JwtTokenService jwt, IClock clock, 
             UserId = user.Id,
             ActiveCompanyId = activeCompanyId,
             ActiveLocationId = activeLocationId,
-            IsTwoFactorComplete = true,
             SecurityStamp = user.SecurityStamp,
             DeviceId = deviceId,
             RefreshTokenHash = TokenGenerator.Sha256(rawRefresh),

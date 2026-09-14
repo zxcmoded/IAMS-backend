@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
+﻿CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
     "MigrationId" character varying(150) NOT NULL,
     "ProductVersion" character varying(32) NOT NULL,
     CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY ("MigrationId")
@@ -303,6 +303,52 @@ CREATE INDEX "IX_Warehouses_TenantId" ON "Warehouses" ("TenantId");
 
 INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
 VALUES ('20260914073546_InitialCreate', '10.0.4');
+
+COMMIT;
+
+START TRANSACTION;
+DROP TABLE "OtpChallenges";
+
+DROP TABLE "UserDeviceBindings";
+
+DROP TABLE "UserTwoFactorSettings";
+
+DROP INDEX "IX_Users_NormalizedUsername";
+
+ALTER TABLE "UserSessions" DROP COLUMN "IsTwoFactorComplete";
+
+ALTER TABLE "Users" DROP COLUMN "NormalizedUsername";
+
+ALTER TABLE "Users" DROP COLUMN "PasswordHash";
+
+ALTER TABLE "Users" ADD "ActivatedAtUtc" timestamptz;
+
+ALTER TABLE "Users" ADD "ActivatedDeviceId" character varying(200);
+
+ALTER TABLE "Users" ADD "ActivationKeyHash" character varying(128);
+
+ALTER TABLE "Users" ADD "ActivationResetAtUtc" timestamptz;
+
+ALTER TABLE "Users" ADD "ActivationResetByUserId" uuid;
+
+ALTER TABLE "Users" ADD "ActivationStatus" character varying(20);
+
+UPDATE "Users" SET "ActivationKeyHash" = 'legacy:' || "Id"::text, "ActivationStatus" = 'NotActivated' WHERE "ActivationKeyHash" IS NULL;
+
+ALTER TABLE "Users" ALTER COLUMN "ActivationKeyHash" SET NOT NULL;
+
+ALTER TABLE "Users" ALTER COLUMN "ActivationStatus" SET NOT NULL;
+
+CREATE UNIQUE INDEX "IX_Users_ActivationKeyHash" ON "Users" ("ActivationKeyHash");
+
+CREATE INDEX "IX_Users_ActivationResetByUserId" ON "Users" ("ActivationResetByUserId");
+
+ALTER TABLE "Users" ADD CONSTRAINT "CK_Users_ActivationStatus" CHECK ("ActivationStatus" IN ('NotActivated', 'Activated'));
+
+ALTER TABLE "Users" ADD CONSTRAINT "FK_Users_Users_ActivationResetByUserId" FOREIGN KEY ("ActivationResetByUserId") REFERENCES "Users" ("Id") ON DELETE RESTRICT;
+
+INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+VALUES ('20260914104810_ActivationKeyAuthentication', '10.0.4');
 
 COMMIT;
 

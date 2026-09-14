@@ -13,7 +13,7 @@ public record UserSummary(Guid Id, string Username, string DisplayName)
 }
 
 /// <summary>
-/// The token pair + user returned by 2FA verify and by token refresh. The full effective scope
+/// The token pair + user returned by activation and by token refresh. The full effective scope
 /// (active tenant/company/location + connections + permissions) is fetched separately from
 /// GET /api/me/scope so this response stays small and both auth slices share one shape.
 /// </summary>

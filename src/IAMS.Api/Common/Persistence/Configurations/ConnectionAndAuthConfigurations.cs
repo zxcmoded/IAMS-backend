@@ -97,13 +97,21 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         b.ToTable("Users");
         b.HasKey(x => x.Id);
         b.Property(x => x.Username).HasMaxLength(256).IsRequired();
-        b.Property(x => x.NormalizedUsername).HasMaxLength(256).IsRequired();
         b.Property(x => x.Email).HasMaxLength(320);
-        b.Property(x => x.PasswordHash).HasMaxLength(512).IsRequired();
+        b.Property(x => x.ActivationKeyHash).HasMaxLength(128).IsRequired();
+        b.Property(x => x.ActivationStatus).HasConversion<string>().HasMaxLength(20);
+        b.Property(x => x.ActivatedDeviceId).HasMaxLength(200);
         b.Property(x => x.SecurityStamp).HasMaxLength(128).IsRequired();
         b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
         b.Property(x => x.IsSystemAdmin).HasDefaultValue(false);
-        b.HasIndex(x => x.NormalizedUsername).IsUnique();
+        b.AddEnumCheck<ActivationStatus>(nameof(User.ActivationStatus));
+
+        // The Activation Key is the ONLY credential — this is the lookup index ActivateHandler queries by
+        // (a hash of the presented key), so it must be unique: two users can never share a key.
+        b.HasIndex(x => x.ActivationKeyHash).IsUnique();
+
+        b.HasOne(x => x.ActivationResetByUser).WithMany()
+            .HasForeignKey(x => x.ActivationResetByUserId).OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -136,41 +144,6 @@ public class UserCompanyMembershipConfiguration : IEntityTypeConfiguration<UserC
     }
 }
 
-public class UserTwoFactorSettingConfiguration : IEntityTypeConfiguration<UserTwoFactorSetting>
-{
-    public void Configure(EntityTypeBuilder<UserTwoFactorSetting> b)
-    {
-        b.ToTable("UserTwoFactorSettings");
-        b.HasKey(x => x.UserId);
-        b.Property(x => x.Channel).HasConversion<string>().HasMaxLength(20);
-        b.Property(x => x.SharedSecret).HasMaxLength(256);
-        b.AddEnumCheck<TwoFactorChannel>(nameof(UserTwoFactorSetting.Channel));
-        b.HasOne(x => x.User).WithOne(u => u.TwoFactorSetting)
-            .HasForeignKey<UserTwoFactorSetting>(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
-    }
-}
-
-public class OtpChallengeConfiguration : IEntityTypeConfiguration<OtpChallenge>
-{
-    public void Configure(EntityTypeBuilder<OtpChallenge> b)
-    {
-        b.ToTable("OtpChallenges");
-        b.HasKey(x => x.Id);
-        b.Property(x => x.ChallengeToken).HasMaxLength(128).IsRequired();
-        b.Property(x => x.CodeHash).HasMaxLength(256).IsRequired();
-        b.Property(x => x.Purpose).HasConversion<string>().HasMaxLength(20);
-        b.Property(x => x.Channel).HasConversion<string>().HasMaxLength(20);
-        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
-        b.Ignore(x => x.IsConsumed);
-        b.AddEnumCheck<OtpPurpose>(nameof(OtpChallenge.Purpose));
-        b.AddEnumCheck<TwoFactorChannel>(nameof(OtpChallenge.Channel));
-        b.HasOne(x => x.User).WithMany()
-            .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
-        b.HasIndex(x => x.ChallengeToken).IsUnique();
-        b.HasIndex(x => new { x.UserId, x.Purpose }).HasFilter("\"ConsumedAtUtc\" IS NULL");
-    }
-}
-
 public class UserSessionConfiguration : IEntityTypeConfiguration<UserSession>
 {
     public void Configure(EntityTypeBuilder<UserSession> b)
@@ -189,29 +162,5 @@ public class UserSessionConfiguration : IEntityTypeConfiguration<UserSession>
             .HasForeignKey(x => x.ActiveLocationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => x.UserId).HasFilter("\"RevokedAtUtc\" IS NULL");
         b.HasIndex(x => x.RefreshTokenHash);
-    }
-}
-
-public class UserDeviceBindingConfiguration : IEntityTypeConfiguration<UserDeviceBinding>
-{
-    public void Configure(EntityTypeBuilder<UserDeviceBinding> b)
-    {
-        b.ToTable("UserDeviceBindings");
-        b.HasKey(x => x.Id);
-        b.Property(x => x.DeviceId).HasMaxLength(200).IsRequired();
-        b.Property(x => x.DeviceType).HasMaxLength(100);
-        b.Property(x => x.DeviceName).HasMaxLength(200);
-        b.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
-        b.Property(x => x.RegisteredAtUtc).HasDefaultValueSql("now()");
-        // Optimistic concurrency via Npgsql `xmin` — see IamsDbContext.OnModelCreating.
-        b.AddEnumCheck<DeviceBindingStatus>(nameof(UserDeviceBinding.Status));
-
-        // One binding per user, ever — a reset flips Status rather than allowing a second row.
-        b.HasOne(x => x.User).WithMany()
-            .HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
-        b.HasOne(x => x.ResetByUser).WithMany()
-            .HasForeignKey(x => x.ResetByUserId).OnDelete(DeleteBehavior.Restrict);
-
-        b.HasIndex(x => x.UserId).IsUnique();
     }
 }
