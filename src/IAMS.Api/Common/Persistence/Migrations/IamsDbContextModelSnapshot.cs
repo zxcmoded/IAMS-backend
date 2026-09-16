@@ -50,6 +50,11 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.Property<Guid>("RackId")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime>("SyncCursorUtc")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("timestamptz")
+                        .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
@@ -68,6 +73,9 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.HasIndex("TenantId");
 
                     b.HasIndex("WarehouseId");
+
+                    b.HasIndex("CompanyId", "SyncCursorUtc", "Id")
+                        .HasDatabaseName("IX_Bins_Sync");
 
                     b.ToTable("Bins", (string)null);
                 });
@@ -91,12 +99,23 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<DateTime>("SyncCursorUtc")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("timestamptz")
+                        .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamptz");
 
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("SyncCursorUtc", "Id")
+                        .HasDatabaseName("IX_Companies_Sync");
 
                     b.ToTable("Companies", (string)null);
                 });
@@ -276,6 +295,11 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<DateTime>("SyncCursorUtc")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("timestamptz")
+                        .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
@@ -289,6 +313,9 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.HasIndex("TenantId");
 
                     b.HasIndex("CompanyId", "Region");
+
+                    b.HasIndex("CompanyId", "SyncCursorUtc", "Id")
+                        .HasDatabaseName("IX_Locations_Sync");
 
                     b.ToTable("Locations", (string)null);
                 });
@@ -318,6 +345,11 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<DateTime>("SyncCursorUtc")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("timestamptz")
+                        .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
@@ -334,6 +366,9 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.HasIndex("TenantId");
 
                     b.HasIndex("WarehouseId");
+
+                    b.HasIndex("CompanyId", "SyncCursorUtc", "Id")
+                        .HasDatabaseName("IX_Racks_Sync");
 
                     b.ToTable("Racks", (string)null);
                 });
@@ -581,6 +616,11 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<DateTime>("SyncCursorUtc")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("timestamptz")
+                        .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid");
 
@@ -594,6 +634,9 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.HasIndex("LocationId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("CompanyId", "SyncCursorUtc", "Id")
+                        .HasDatabaseName("IX_Warehouses_Sync");
 
                     b.ToTable("Warehouses", (string)null);
                 });

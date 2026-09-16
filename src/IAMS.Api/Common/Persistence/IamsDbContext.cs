@@ -47,6 +47,27 @@ public class IamsDbContext : DbContext
                 .HasColumnName("xmin")
                 .ValueGeneratedOnAddOrUpdate()
                 .IsRowVersion();
+
+            // The master-data sync cursor is a STORED generated column, COALESCE(UpdatedAtUtc, CreatedAtUtc),
+            // so every row has a single monotone-ish keyset value the composite indexes can order on. This is
+            // applied only under Npgsql: the in-memory provider can't evaluate a Postgres generated column, so
+            // there the shadow property (declared in HierarchyConfigurations) stays plain-writable for tests.
+            const string cursorSql = "COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")";
+            modelBuilder.Entity<Company>()
+                .Property<DateTime>(MasterData.SyncCursor.ColumnName)
+                .HasComputedColumnSql(cursorSql, stored: true);
+            modelBuilder.Entity<Location>()
+                .Property<DateTime>(MasterData.SyncCursor.ColumnName)
+                .HasComputedColumnSql(cursorSql, stored: true);
+            modelBuilder.Entity<Warehouse>()
+                .Property<DateTime>(MasterData.SyncCursor.ColumnName)
+                .HasComputedColumnSql(cursorSql, stored: true);
+            modelBuilder.Entity<Rack>()
+                .Property<DateTime>(MasterData.SyncCursor.ColumnName)
+                .HasComputedColumnSql(cursorSql, stored: true);
+            modelBuilder.Entity<Bin>()
+                .Property<DateTime>(MasterData.SyncCursor.ColumnName)
+                .HasComputedColumnSql(cursorSql, stored: true);
         }
 
         base.OnModelCreating(modelBuilder);

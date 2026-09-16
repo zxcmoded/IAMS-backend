@@ -1,4 +1,5 @@
 using IAMS.Api.Common.Domain;
+using IAMS.Api.Common.MasterData;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -24,12 +25,26 @@ internal static class EnumCheck
 
 internal static class NodeConfig
 {
+    /// <summary>
+    /// The stored generated sync-cursor column, mapped as a shadow property so LINQ can order/filter on it
+    /// via <c>EF.Property&lt;DateTime&gt;(x, SyncCursorColumn)</c>. Its <c>GENERATED ALWAYS AS
+    /// COALESCE(UpdatedAtUtc, CreatedAtUtc) STORED</c> definition is applied only under the Npgsql provider
+    /// (see <see cref="IamsDbContext.OnModelCreating"/>) — the in-memory test provider cannot evaluate a
+    /// Postgres generated column, so there it stays a plain writable shadow property that tests seed directly.
+    /// </summary>
+    public const string SyncCursorColumn = SyncCursor.ColumnName;
+
     public static void ConfigureNodeBasics<T>(EntityTypeBuilder<T> b) where T : HierarchyNode
     {
         b.HasKey(x => x.Id);
         b.Property(x => x.Name).HasMaxLength(200).IsRequired();
         b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
         b.HasIndex(x => x.TenantId);
+
+        // Sync-cursor shadow column + keyset index for master-data sync (per child level, scoped by CompanyId).
+        b.Property<DateTime>(SyncCursorColumn);
+        b.HasIndex("CompanyId", SyncCursorColumn, "Id")
+            .HasDatabaseName($"IX_{b.Metadata.GetTableName()}_Sync");
     }
 }
 
@@ -58,6 +73,10 @@ public class CompanyConfiguration : IEntityTypeConfiguration<Company>
         b.HasOne(x => x.Tenant).WithMany(t => t.Companies)
             .HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => x.TenantId);
+
+        // Sync-cursor shadow column + keyset index (Company is not a HierarchyNode, so it's wired here).
+        b.Property<DateTime>(NodeConfig.SyncCursorColumn);
+        b.HasIndex(NodeConfig.SyncCursorColumn, "Id").HasDatabaseName("IX_Companies_Sync");
     }
 }
 

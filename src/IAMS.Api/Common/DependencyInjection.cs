@@ -14,6 +14,11 @@ using IAMS.Api.Features.Admin.ResetUserActivation;
 using IAMS.Api.Features.Auth.Activate;
 using IAMS.Api.Features.Auth.Logout;
 using IAMS.Api.Features.Auth.RefreshToken;
+using IAMS.Api.Features.MasterData.ListBins;
+using IAMS.Api.Features.MasterData.ListCompanies;
+using IAMS.Api.Features.MasterData.ListLocations;
+using IAMS.Api.Features.MasterData.ListRacks;
+using IAMS.Api.Features.MasterData.ListWarehouses;
 using IAMS.Api.Features.Scope.GetEffectiveScope;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -34,6 +39,10 @@ public static class DependencyInjection
             o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
         services.AddProblemDetails();
+
+        // Normalize minimal-API parameter-binding failures (bad parentId/pageSize) to the standard
+        // ProblemDetails+code shape instead of a raw framework 400. See BadRequestExceptionHandler.
+        services.AddExceptionHandler<Errors.BadRequestExceptionHandler>();
 
         // Throttle unauthenticated auth endpoints per client IP to close the unlimited online
         // brute-force gap (distinct from the deliberately-deferred account-lockout policy).
@@ -82,6 +91,11 @@ public static class DependencyInjection
         services.AddScoped<EvaluateAccessHandler>();
         services.AddScoped<EvaluateAccessBatchHandler>();
         services.AddScoped<ResetUserActivationHandler>();
+        services.AddScoped<ListCompaniesHandler>();
+        services.AddScoped<ListLocationsHandler>();
+        services.AddScoped<ListWarehousesHandler>();
+        services.AddScoped<ListRacksHandler>();
+        services.AddScoped<ListBinsHandler>();
 
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
 
@@ -144,6 +158,11 @@ public static class DependencyInjection
         app.MapEvaluateAccessEndpoint();
         app.MapEvaluateAccessBatchEndpoint();
         app.MapResetUserActivationEndpoint();
+        app.MapListCompaniesEndpoint();
+        app.MapListLocationsEndpoint();
+        app.MapListWarehousesEndpoint();
+        app.MapListRacksEndpoint();
+        app.MapListBinsEndpoint();
         return app;
     }
 }

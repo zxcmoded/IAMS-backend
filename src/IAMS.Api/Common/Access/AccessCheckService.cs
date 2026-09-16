@@ -25,6 +25,28 @@ public class AccessCheckService(IamsDbContext db, ICurrentUser currentUser)
         Guid? BinId,
         PermissionLevel RequiredPermission);
 
+    /// <summary>
+    /// The set of companies the current actor can reach for master-data sync: their own home company plus
+    /// every company reachable via an <b>enabled</b> <see cref="CompanyConnection"/> from it. This is the
+    /// same "reachable universe" the master-data listing endpoints filter every level by (via the
+    /// denormalized <c>CompanyId</c> on each node).
+    ///
+    /// Unlike <c>GetEffectiveScopeHandler</c> — which deliberately surfaces disabled connections too, for
+    /// UI display — this intentionally excludes disabled connections: a disabled connection grants nothing
+    /// (BR-TC-001/005), so its target's data must not be syncable.
+    /// </summary>
+    public async Task<IReadOnlySet<Guid>> GetReachableCompanyIdsAsync(CancellationToken ct)
+    {
+        var companyId = currentUser.CompanyId;
+        var targets = await db.CompanyConnections.AsNoTracking()
+            .Where(c => c.SourceCompanyId == companyId && c.IsEnabled)
+            .Select(c => c.TargetCompanyId)
+            .ToListAsync(ct);
+
+        var reachable = new HashSet<Guid>(targets) { companyId };
+        return reachable;
+    }
+
     /// <summary>The actor's aggregate policy revision — the max across all connections from their active company.</summary>
     public async Task<long> GetActorPolicyVersionAsync(CancellationToken ct)
     {

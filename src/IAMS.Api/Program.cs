@@ -6,6 +6,9 @@ builder.Services.AddIamsServices(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
 
+// Wraps the whole pipeline so binding failures (thrown before endpoints run) get the standard error shape.
+app.UseExceptionHandler();
+
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

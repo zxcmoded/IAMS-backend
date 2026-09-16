@@ -35,6 +35,12 @@ public class Company
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAtUtc { get; set; }
 
+    /// <summary>
+    /// Last modification timestamp. Added for symmetry with <see cref="HierarchyNode"/> so Company can
+    /// participate in the same COALESCE(UpdatedAtUtc, CreatedAtUtc) sync-cursor scheme as the other levels.
+    /// </summary>
+    public DateTime? UpdatedAtUtc { get; set; }
+
     public Guid TenantId { get; set; }
     public Tenant Tenant { get; set; } = null!;
 

@@ -24,3 +24,17 @@ IAMS_PG_TEST_CONN="Host=localhost;Port=5432;Database=iams_qatest;Username=iams;P
 **How to apply:** when verifying "the opt-in Postgres tests pass," always run each class in isolation via `--filter FullyQualifiedName~<ClassName>` (or fix the root cause) rather than trusting a bare `IAMS_PG_TEST_CONN=... dotnet test` — the failure is real and reproducible, not a fluke of my environment.
 
 See also [[real-db-verification-approach]] for how to get a working Postgres instance without probing container credentials.
+
+## Gotcha: enum columns are stored as strings, and `DeviceBindingSqlConcurrencyTests` was renamed
+
+When hand-seeding rows via raw SQL against this schema (e.g. to drive live-HTTP QA), every C# enum
+(`TenantKind`, `ActivationStatus`, `ConnectionType`, `PermissionLevel`, `HierarchyLevel`, ...) is
+persisted as its **string name** (`character varying` with a `CHECK` constraint listing the allowed
+string values), not its underlying int — e.g. `Kind = 'Parent'` not `Kind = 0`, and the enum values
+themselves are 1-based in C# (`TenantKind.Parent = 1`), so don't assume `0` is a valid first member
+either way. Confirmed via `\d "Tenants"` etc. showing `CHECK ("Kind"::text = ANY (ARRAY['Parent'...`.
+
+Also: the opt-in test class I previously called `DeviceBindingSqlConcurrencyTests` has been renamed
+to `ActivationSqlConcurrencyTests` (file `tests/IAMS.Api.Tests/ActivationSqlConcurrencyTests.cs`) as
+of the Activation Key auth rework — verify the current filename with `find`/`grep` before assuming
+the old name still matches anything, rather than trusting this memory's literal class name.
