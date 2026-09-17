@@ -25,6 +25,14 @@ public class IamsDbContext : DbContext
     public DbSet<UserCompanyMembership> UserCompanyMemberships => Set<UserCompanyMembership>();
     public DbSet<UserSession> UserSessions => Set<UserSession>();
 
+    // Phase 2a — F3 Scanning + F4 Inventory Operations.
+    public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
+    public DbSet<StockLevel> StockLevels => Set<StockLevel>();
+    public DbSet<InventoryTransaction> InventoryTransactions => Set<InventoryTransaction>();
+    public DbSet<StockCount> StockCounts => Set<StockCount>();
+    public DbSet<InventorySettings> InventorySettings => Set<InventorySettings>();
+    public DbSet<ScanEvent> ScanEvents => Set<ScanEvent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(IamsDbContext).Assembly);
@@ -68,6 +76,37 @@ public class IamsDbContext : DbContext
             modelBuilder.Entity<Bin>()
                 .Property<DateTime>(MasterData.SyncCursor.ColumnName)
                 .HasComputedColumnSql(cursorSql, stored: true);
+
+            // ── Phase 2a (F3/F4) Npgsql-only wiring ─────────────────────────────────────────────────
+            // (a) xmin optimistic-concurrency tokens for the mutable/config rows (same pattern as
+            //     User/CompanyConnection above). Ledger/scan rows are append-only, so they need none.
+            foreach (var clr in new[]
+                     {
+                         typeof(StockLevel), typeof(StockCount),
+                         typeof(InventoryItem), typeof(InventorySettings)
+                     })
+            {
+                modelBuilder.Entity(clr).Property<uint>("xmin")
+                    .HasColumnName("xmin").ValueGeneratedOnAddOrUpdate().IsRowVersion();
+            }
+
+            // (b) The master-data sync cursor (COALESCE(UpdatedAtUtc, CreatedAtUtc) STORED) extended to the
+            //     inventory tables that participate in offline sync (phase-2a §2.8). ScanEvents and
+            //     InventorySettings are intentionally NOT cursor-synced.
+            foreach (var clr in new[]
+                     {
+                         typeof(InventoryItem), typeof(StockLevel),
+                         typeof(InventoryTransaction), typeof(StockCount)
+                     })
+            {
+                modelBuilder.Entity(clr).Property<DateTime>(MasterData.SyncCursor.ColumnName)
+                    .HasComputedColumnSql(cursorSql, stored: true);
+            }
+
+            // (c) StockCount.Variance is the STORED generated CountedQuantity - SystemQuantity — one
+            //     authoritative definition so an inconsistent variance can never be written.
+            modelBuilder.Entity<StockCount>().Property(x => x.Variance)
+                .HasComputedColumnSql("\"CountedQuantity\" - \"SystemQuantity\"", stored: true);
         }
 
         base.OnModelCreating(modelBuilder);
@@ -83,13 +122,50 @@ public class IamsDbContext : DbContext
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         BumpPolicyRevisions();
+        BumpStockLevelVersions();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         BumpPolicyRevisions();
+        BumpStockLevelVersions();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>
+    /// Integrity invariant for offline conflict detection (phase-2a §2.2 / §5): the application-managed
+    /// <see cref="StockLevel.Version"/> is the monotonic semantic version the mobile stamps a queued mutation
+    /// with and the backend compares against at push time. It MUST advance in the same transaction as every
+    /// applied on-hand change, or a stale offline mutation could apply silently. Centralizing it here — exactly
+    /// like <see cref="BumpPolicyRevisions"/> centralizes the connection revision — makes it impossible for any
+    /// mutation path (receive / transfer / adjustment / count reconciliation) to forget to bump it.
+    ///
+    /// A brand-new <see cref="StockLevel"/> (State == Added, e.g. a first receive into an empty bin) starts at
+    /// <c>Version = 1</c>; an existing row whose <see cref="StockLevel.QuantityOnHand"/> changed increments and
+    /// stamps <see cref="StockLevel.UpdatedAtUtc"/> so its sync cursor advances too.
+    /// </summary>
+    private void BumpStockLevelVersions()
+    {
+        ChangeTracker.DetectChanges();
+
+        var now = DateTime.UtcNow;
+        foreach (var entry in ChangeTracker.Entries<StockLevel>())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                if (entry.Entity.Version < 1)
+                {
+                    entry.Entity.Version = 1;
+                }
+            }
+            else if (entry.State == EntityState.Modified &&
+                     entry.Property(nameof(StockLevel.QuantityOnHand)).IsModified)
+            {
+                entry.Entity.Version += 1;
+                entry.Entity.UpdatedAtUtc = now;
+            }
+        }
     }
 
     /// <summary>

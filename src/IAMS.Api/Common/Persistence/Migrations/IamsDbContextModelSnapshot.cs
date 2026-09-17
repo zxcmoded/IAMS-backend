@@ -269,6 +269,244 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("IAMS.Api.Common.Domain.InventoryItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Barcode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Category")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Sku")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime>("SyncCursorUtc")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("timestamptz")
+                        .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UnitOfMeasure")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("CompanyId", "Barcode")
+                        .HasFilter("\"Barcode\" IS NOT NULL");
+
+                    b.HasIndex("CompanyId", "Sku")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "SyncCursorUtc", "Id")
+                        .HasDatabaseName("IX_InventoryItems_Sync");
+
+                    b.ToTable("InventoryItems", (string)null);
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.InventorySettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<decimal>("VarianceThreshold")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<string>("VarianceThresholdType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId")
+                        .IsUnique();
+
+                    b.ToTable("InventorySettings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_InventorySettings_VarianceThresholdType", "\"VarianceThresholdType\" IN ('AbsoluteQuantity', 'Percentage')");
+                        });
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.InventoryTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AdjustmentReason")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<long?>("BaseDestinationStockVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("BaseSourceStockVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("ClientCreatedAtUtc")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DestinationBinId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("DeviceId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<Guid?>("ReversalOfTransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("SourceBinId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("SyncCursorUtc")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("timestamptz")
+                        .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TransactionType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamptz");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("DestinationBinId")
+                        .HasFilter("\"DestinationBinId\" IS NOT NULL");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("ReversalOfTransactionId");
+
+                    b.HasIndex("SourceBinId")
+                        .HasFilter("\"SourceBinId\" IS NOT NULL");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("CompanyId", "CreatedAtUtc");
+
+                    b.HasIndex("CompanyId", "SyncCursorUtc", "Id")
+                        .HasDatabaseName("IX_InventoryTransactions_Sync");
+
+                    b.ToTable("InventoryTransactions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_InvTxn_AdjustmentReason", "\"TransactionType\" <> 'Adjustment' OR \"AdjustmentReason\" IS NOT NULL");
+
+                            t.HasCheckConstraint("CK_InvTxn_TypeShape", "(\"TransactionType\" = 'Receive'    AND \"SourceBinId\" IS NULL     AND \"DestinationBinId\" IS NOT NULL AND \"Quantity\" > 0) OR (\"TransactionType\" = 'Transfer'   AND \"SourceBinId\" IS NOT NULL AND \"DestinationBinId\" IS NOT NULL AND \"SourceBinId\" <> \"DestinationBinId\" AND \"Quantity\" > 0) OR (\"TransactionType\" = 'Adjustment' AND \"SourceBinId\" IS NOT NULL AND \"DestinationBinId\" IS NULL     AND \"Quantity\" <> 0)");
+
+                            t.HasCheckConstraint("CK_InventoryTransactions_Status", "\"Status\" IN ('Applied', 'Rejected')");
+
+                            t.HasCheckConstraint("CK_InventoryTransactions_TransactionType", "\"TransactionType\" IN ('Receive', 'Transfer', 'Adjustment')");
+                        });
+                });
+
             modelBuilder.Entity("IAMS.Api.Common.Domain.Location", b =>
                 {
                     b.Property<Guid>("Id")
@@ -394,6 +632,281 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("Roles", (string)null);
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.ScanEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("DeviceId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("RawCode")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<Guid?>("ResolvedEntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ResolvedType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("ScannedAtUtc")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<Guid>("ScannedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("CompanyId", "RawCode");
+
+                    b.HasIndex("CompanyId", "ScannedAtUtc");
+
+                    b.HasIndex("ScannedByUserId", "ScannedAtUtc");
+
+                    b.ToTable("ScanEvents", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ScanEvents_ResolvedType", "\"ResolvedType\" IN ('Sku', 'Location', 'Asset', 'NoMatch', 'Blocked')");
+                        });
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.StockCount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AdjustmentTransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("BaseStockVersion")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("BinId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ClientCreatedAtUtc")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CountedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("CountedQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("DeviceId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RackId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("SyncCursorUtc")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("timestamptz")
+                        .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
+
+                    b.Property<decimal>("SystemQuantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<decimal>("Variance")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)")
+                        .HasComputedColumnSql("\"CountedQuantity\" - \"SystemQuantity\"", true);
+
+                    b.Property<decimal>("VarianceThreshold")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<string>("VarianceThresholdType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AdjustmentTransactionId");
+
+                    b.HasIndex("ApprovedByUserId");
+
+                    b.HasIndex("BinId");
+
+                    b.HasIndex("CountedByUserId");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("CompanyId", "Status")
+                        .HasFilter("\"Status\" = 'PendingApproval'");
+
+                    b.HasIndex("CompanyId", "SyncCursorUtc", "Id")
+                        .HasDatabaseName("IX_StockCounts_Sync");
+
+                    b.ToTable("StockCounts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_StockCounts_CountedNonNegative", "\"CountedQuantity\" >= 0");
+
+                            t.HasCheckConstraint("CK_StockCounts_Status", "\"Status\" IN ('Completed', 'PendingApproval', 'Approved', 'Rejected')");
+
+                            t.HasCheckConstraint("CK_StockCounts_VarianceThresholdType", "\"VarianceThresholdType\" IN ('AbsoluteQuantity', 'Percentage')");
+                        });
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.StockLevel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("BinId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("LocationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("QuantityOnHand")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
+                    b.Property<Guid>("RackId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("SyncCursorUtc")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("timestamptz")
+                        .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("timestamptz");
+
+                    b.Property<long>("Version")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("WarehouseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BinId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("CompanyId", "InventoryItemId");
+
+                    b.HasIndex("InventoryItemId", "BinId")
+                        .IsUnique();
+
+                    b.HasIndex("CompanyId", "SyncCursorUtc", "Id")
+                        .HasDatabaseName("IX_StockLevels_Sync");
+
+                    b.ToTable("StockLevels", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_StockLevels_NonNegative", "\"QuantityOnHand\" >= 0");
+                        });
                 });
 
             modelBuilder.Entity("IAMS.Api.Common.Domain.Tenant", b =>
@@ -729,6 +1242,68 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.Navigation("Connection");
                 });
 
+            modelBuilder.Entity("IAMS.Api.Common.Domain.InventoryItem", b =>
+                {
+                    b.HasOne("IAMS.Api.Common.Domain.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.InventorySettings", b =>
+                {
+                    b.HasOne("IAMS.Api.Common.Domain.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.InventoryTransaction", b =>
+                {
+                    b.HasOne("IAMS.Api.Common.Domain.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IAMS.Api.Common.Domain.Bin", "DestinationBin")
+                        .WithMany()
+                        .HasForeignKey("DestinationBinId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("IAMS.Api.Common.Domain.InventoryItem", "InventoryItem")
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IAMS.Api.Common.Domain.InventoryTransaction", "ReversalOf")
+                        .WithMany()
+                        .HasForeignKey("ReversalOfTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("IAMS.Api.Common.Domain.Bin", "SourceBin")
+                        .WithMany()
+                        .HasForeignKey("SourceBinId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("DestinationBin");
+
+                    b.Navigation("InventoryItem");
+
+                    b.Navigation("ReversalOf");
+
+                    b.Navigation("SourceBin");
+                });
+
             modelBuilder.Entity("IAMS.Api.Common.Domain.Location", b =>
                 {
                     b.HasOne("IAMS.Api.Common.Domain.Company", "Company")
@@ -749,6 +1324,77 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Warehouse");
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.ScanEvent", b =>
+                {
+                    b.HasOne("IAMS.Api.Common.Domain.User", "ScannedByUser")
+                        .WithMany()
+                        .HasForeignKey("ScannedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ScannedByUser");
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.StockCount", b =>
+                {
+                    b.HasOne("IAMS.Api.Common.Domain.InventoryTransaction", "AdjustmentTransaction")
+                        .WithMany()
+                        .HasForeignKey("AdjustmentTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("IAMS.Api.Common.Domain.User", "ApprovedByUser")
+                        .WithMany()
+                        .HasForeignKey("ApprovedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("IAMS.Api.Common.Domain.Bin", "Bin")
+                        .WithMany()
+                        .HasForeignKey("BinId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IAMS.Api.Common.Domain.User", "CountedByUser")
+                        .WithMany()
+                        .HasForeignKey("CountedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IAMS.Api.Common.Domain.InventoryItem", "InventoryItem")
+                        .WithMany()
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AdjustmentTransaction");
+
+                    b.Navigation("ApprovedByUser");
+
+                    b.Navigation("Bin");
+
+                    b.Navigation("CountedByUser");
+
+                    b.Navigation("InventoryItem");
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.StockLevel", b =>
+                {
+                    b.HasOne("IAMS.Api.Common.Domain.Bin", "Bin")
+                        .WithMany()
+                        .HasForeignKey("BinId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("IAMS.Api.Common.Domain.InventoryItem", "InventoryItem")
+                        .WithMany("StockLevels")
+                        .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Bin");
+
+                    b.Navigation("InventoryItem");
                 });
 
             modelBuilder.Entity("IAMS.Api.Common.Domain.User", b =>
@@ -834,6 +1480,11 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.Navigation("Filters");
 
                     b.Navigation("Scopes");
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.InventoryItem", b =>
+                {
+                    b.Navigation("StockLevels");
                 });
 
             modelBuilder.Entity("IAMS.Api.Common.Domain.Location", b =>

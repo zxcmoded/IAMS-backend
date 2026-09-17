@@ -163,6 +163,23 @@ companies (or their descendants) that *disappear* from the reachable set. Those 
 SQLite indefinitely after the server-side connection is disabled — a real data-retention gap to
 close before any screen displays this data, tracked as a follow-up rather than blocking this round.
 
+## ⚠️ Known gap for the mobile team — steady-state incremental sync of already-`complete` levels
+
+Once a child level (`locations`/`warehouses`/`racks`/`bins`) reaches `complete` for the current
+reachable-company set, `HierarchySyncService.run()` skips it on every subsequent pass — the
+per-level `last_cursor` is currently only used to *resume an interrupted initial sync*, never as
+the starting point for an incremental "since" poll once complete. Practical effect: after the
+initial full sync, edits to already-reachable companies' descendants (a new location, a renamed
+warehouse, a soft-deleted bin) never reach the device. Only a **newly-reachable company**
+(reachability diff, see above) forces a re-pull, and that path does a full re-pull rather than an
+incremental one anyway. This matches the approved design's literal "skip if already complete"
+wording, so it's a design-scope gap rather than an implementation bug — flagged here (round-2 code
+review, 2026-09-16) since no UI consumes `HierarchyRepository` yet, so there's no user-visible
+impact today. Close before any screen relies on this data staying fresh post-initial-sync: either
+widen `run()` to always attempt an incremental cursor-forward fetch on complete levels (cheap,
+mirrors the existing "always run Company" pattern), or explicitly document a periodic
+force-full-resync as the intended staleness mitigation.
+
 ## Notes for testing
 
 The `syncCursorUtc` keyset value is a Postgres **stored generated column**

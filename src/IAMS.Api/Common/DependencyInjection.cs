@@ -19,7 +19,17 @@ using IAMS.Api.Features.MasterData.ListCompanies;
 using IAMS.Api.Features.MasterData.ListLocations;
 using IAMS.Api.Features.MasterData.ListRacks;
 using IAMS.Api.Features.MasterData.ListWarehouses;
+using IAMS.Api.Features.Inventory.AdjustStock;
+using IAMS.Api.Features.Inventory.ApproveStockCount;
+using IAMS.Api.Features.Inventory.CreateStockCount;
+using IAMS.Api.Features.Inventory.GetInventoryItem;
+using IAMS.Api.Features.Inventory.ListInventory;
+using IAMS.Api.Features.Inventory.ReceiveStock;
+using IAMS.Api.Features.Inventory.RejectStockCount;
+using IAMS.Api.Features.Inventory.TransferStock;
+using IAMS.Api.Features.Scanning.ResolveScan;
 using IAMS.Api.Features.Scope.GetEffectiveScope;
+using IAMS.Api.Common.Inventory;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -97,6 +107,18 @@ public static class DependencyInjection
         services.AddScoped<ListRacksHandler>();
         services.AddScoped<ListBinsHandler>();
 
+        // Phase 2a — F3 Scanning + F4 Inventory Operations.
+        services.AddScoped<StockMovementService>();
+        services.AddScoped<ResolveScanHandler>();
+        services.AddScoped<ListInventoryHandler>();
+        services.AddScoped<GetInventoryItemHandler>();
+        services.AddScoped<ReceiveStockHandler>();
+        services.AddScoped<TransferStockHandler>();
+        services.AddScoped<AdjustStockHandler>();
+        services.AddScoped<CreateStockCountHandler>();
+        services.AddScoped<ApproveStockCountHandler>();
+        services.AddScoped<RejectStockCountHandler>();
+
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
 
         // Platform-wide admin gate (Users.IsSystemAdmin), NOT scoped to any tenant/company. Distinct from
@@ -163,6 +185,17 @@ public static class DependencyInjection
         app.MapListWarehousesEndpoint();
         app.MapListRacksEndpoint();
         app.MapListBinsEndpoint();
+
+        // Phase 2a — F3 Scanning + F4 Inventory Operations.
+        app.MapResolveScanEndpoint();
+        app.MapListInventoryEndpoint();
+        app.MapGetInventoryItemEndpoint();
+        app.MapReceiveStockEndpoint();
+        app.MapTransferStockEndpoint();
+        app.MapAdjustStockEndpoint();
+        app.MapCreateStockCountEndpoint();
+        app.MapApproveStockCountEndpoint();
+        app.MapRejectStockCountEndpoint();
         return app;
     }
 }
