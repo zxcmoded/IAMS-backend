@@ -35,8 +35,8 @@ public class User
 
     /// <summary>
     /// SHA-256 hash of the Activation Key — the ONLY credential. Looked up by exact hash match (same
-    /// deterministic-hash-for-lookup pattern as <see cref="UserSession.RefreshTokenHash"/> /
-    /// <see cref="Security.TokenGenerator.Sha256"/>), not PBKDF2: the key itself is the row-selector (there
+    /// deterministic-hash-for-lookup pattern as <see cref="Security.TokenGenerator.Sha256"/>), not PBKDF2:
+    /// the key itself is the row-selector (there
     /// is no separate "username" to find the user by first), and a high-entropy, system/admin-provisioned
     /// token does not need PBKDF2's slow, salted, "resist offline guessing of a low-entropy human secret"
     /// property the way a user-chosen password would. The raw key is never persisted or logged.

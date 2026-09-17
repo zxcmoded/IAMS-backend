@@ -151,7 +151,6 @@ public class UserSessionConfiguration : IEntityTypeConfiguration<UserSession>
         b.ToTable("UserSessions");
         b.HasKey(x => x.Id);
         b.Property(x => x.DeviceId).HasMaxLength(200);
-        b.Property(x => x.RefreshTokenHash).HasMaxLength(256);
         b.Property(x => x.SecurityStamp).HasMaxLength(128);
         b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
         b.HasOne(x => x.User).WithMany(u => u.Sessions)
@@ -161,6 +160,5 @@ public class UserSessionConfiguration : IEntityTypeConfiguration<UserSession>
         b.HasOne(x => x.ActiveLocation).WithMany()
             .HasForeignKey(x => x.ActiveLocationId).OnDelete(DeleteBehavior.Restrict);
         b.HasIndex(x => x.UserId).HasFilter("\"RevokedAtUtc\" IS NULL");
-        b.HasIndex(x => x.RefreshTokenHash);
     }
 }

@@ -33,6 +33,7 @@ public sealed class FakeCurrentUser : ICurrentUser
     public Guid TenantId { get; set; }
     public Guid CompanyId { get; set; }
     public Guid? LocationId { get; set; }
+    public Guid? SessionId { get; set; }
     public bool IsSystemAdmin { get; set; }
 }
 

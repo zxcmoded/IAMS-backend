@@ -19,7 +19,7 @@ public static class IamsClaims
     public const string IsSystemAdmin = "is_system_admin";
 }
 
-/// <summary>The resolved active scope embedded in an access token, resolved from the user's session at login/refresh.</summary>
+/// <summary>The resolved active scope embedded in an access token, resolved from the user's session at login.</summary>
 public readonly record struct AccessTokenScope(
     Guid UserId,
     string Username,
@@ -35,7 +35,7 @@ public class JwtTokenService(IOptions<JwtOptions> options)
 
     public (string Token, DateTimeOffset ExpiresAt) CreateAccessToken(AccessTokenScope scope, DateTimeOffset now)
     {
-        var expires = now.AddMinutes(_options.AccessTokenMinutes);
+        var expires = now.AddDays(_options.AccessTokenLifetimeDays);
 
         var claims = new List<Claim>
         {

@@ -7,7 +7,6 @@ using IAMS.Api.Common.Time;
 using IAMS.Api.Features.Admin.ResetUserActivation;
 using IAMS.Api.Features.Auth;
 using IAMS.Api.Features.Auth.Activate;
-using IAMS.Api.Features.Auth.RefreshToken;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -32,8 +31,7 @@ public class ActivationTests
     private static readonly IOptions<JwtOptions> Options = Microsoft.Extensions.Options.Options.Create(new JwtOptions
     {
         SigningKey = "test-signing-key-that-is-long-enough-32b",
-        AccessTokenMinutes = 15,
-        RefreshTokenDays = 30
+        AccessTokenLifetimeDays = 36500
     });
 
     private static async Task<(IamsDbContext Db, User User)> SeedUserAsync(string rawKey = RawKey, bool isActive = true)
@@ -63,7 +61,7 @@ public class ActivationTests
     }
 
     private static ActivateHandler NewActivate(IamsDbContext db, FakeClock clock) =>
-        new(db, new SessionIssuer(db, new JwtTokenService(Options), clock, Options), new ActiveScopeResolver(db), clock);
+        new(db, new SessionIssuer(db, new JwtTokenService(Options), clock), new ActiveScopeResolver(db), clock);
 
     [Fact]
     public async Task Activate_FreshKey_BindsDeviceAndIssuesSession()
@@ -75,7 +73,6 @@ public class ActivationTests
 
         var ok = Assert.IsType<Ok<Features.Auth.AuthTokenResponse>>(result.Result);
         Assert.False(string.IsNullOrEmpty(ok.Value!.AccessToken));
-        Assert.False(string.IsNullOrEmpty(ok.Value.RefreshToken));
 
         var user = db.Users.Single();
         Assert.Equal(ActivationStatus.Activated, user.ActivationStatus);
@@ -236,34 +233,26 @@ public class ActivationTests
     }
 
     [Fact]
-    public async Task ResetUserActivation_RevokesExistingSession_SoItCanNoLongerRefresh()
+    public async Task ResetUserActivation_RevokesExistingSessionForAudit_AndRotatesSecurityStamp()
     {
-        // CRITICAL fix from code review: a session issued to the OLD (now-reset) device must not keep
-        // silently renewing itself via refresh for up to RefreshTokenDays after an admin reset.
+        // With permanent stateless tokens there is no refresh flow to block, but an admin reset must still
+        // perform the session/security bookkeeping: rotate the security stamp, flip the user back to
+        // NotActivated (so the old device cannot re-activate the key), and mark the existing session revoked
+        // as an audit record. It does NOT invalidate the already-issued access token (an accepted gap).
         var (db, user) = await SeedUserAsync();
         var clock = new FakeClock(DateTimeOffset.UtcNow);
         var originalStamp = user.SecurityStamp;
-        var activateResult = await NewActivate(db, clock).HandleAsync(new ActivateCommand(RawKey, "device-1"), CancellationToken.None);
-        var issuedRefreshToken = Assert.IsType<Ok<AuthTokenResponse>>(activateResult.Result).Value!.RefreshToken;
+        await NewActivate(db, clock).HandleAsync(new ActivateCommand(RawKey, "device-1"), CancellationToken.None);
 
         var admin = new FakeCurrentUser { UserId = Guid.NewGuid(), IsSystemAdmin = true };
         var resetHandler = new ResetUserActivationHandler(db, admin, clock);
         var resetResult = await resetHandler.HandleAsync(new ResetUserActivationCommand(user.Id), CancellationToken.None);
         Assert.IsType<Ok<ResetUserActivationResponse>>(resetResult.Result);
 
-        // Both revocation mechanisms should now be in place.
         var resetUser = db.Users.Single();
         Assert.NotEqual(originalStamp, resetUser.SecurityStamp);
+        Assert.Equal(ActivationStatus.NotActivated, resetUser.ActivationStatus);
         Assert.Equal(1, db.UserSessions.Count(s => s.RevokedAtUtc != null));
-
-        var refreshHandler = new RefreshTokenHandler(
-            db, new SessionIssuer(db, new JwtTokenService(Options), clock, Options), new ActiveScopeResolver(db), clock);
-        var refreshResult = await refreshHandler.HandleAsync(
-            new RefreshTokenCommand(issuedRefreshToken, "device-1"), CancellationToken.None);
-
-        var problem = Assert.IsType<ProblemHttpResult>(refreshResult.Result);
-        Assert.Equal(StatusCodes.Status401Unauthorized, problem.StatusCode);
-        Assert.Equal(IAMS.Api.Common.Errors.ErrorCodes.SessionExpired, problem.ProblemDetails.Extensions["code"]);
     }
 
     [Fact]

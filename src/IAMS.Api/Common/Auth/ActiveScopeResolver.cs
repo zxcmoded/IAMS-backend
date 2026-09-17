@@ -26,7 +26,7 @@ public class ActiveScopeResolver(IamsDbContext db)
         return membership is null ? null : new ActiveScope(membership.TenantId, membership.CompanyId, null);
     }
 
-    /// <summary>Resolve the tenant for an already-chosen active company (used at token refresh).</summary>
+    /// <summary>Resolve the tenant for an already-chosen active company.</summary>
     public async Task<Guid?> ResolveTenantForCompanyAsync(Guid companyId, CancellationToken ct)
     {
         var tenantId = await db.Companies

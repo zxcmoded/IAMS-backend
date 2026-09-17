@@ -37,18 +37,20 @@ public class ResetUserActivationValidator : AbstractValidator<ResetUserActivatio
 /// same Activation Key can then be activated again, on whichever device presents it next (see
 /// ActivateHandler).
 ///
-/// Also cuts off the OLD device's access immediately, using the two revocation mechanisms this codebase
-/// already has (an admin reset — e.g. "device lost/stolen" — must not leave the old device quietly able
-/// to keep going for up to <c>RefreshTokenDays</c>):
-///   - Rotates <see cref="User.SecurityStamp"/>, which <c>RefreshTokenHandler</c> already compares against
-///     each session's snapshot and rejects on mismatch — this is what actually stops the old device's
-///     refresh token from renewing itself again.
-///   - Explicitly revokes (<see cref="UserSession.RevokedAtUtc"/>) every currently-active session for this
-///     user, the same pattern <c>LogoutHandler</c> already uses — belt-and-braces immediate revocation
-///     rather than relying solely on the stamp check firing at the NEXT refresh attempt.
-/// Neither mechanism can revoke an already-issued, still-unexpired ACCESS token (JWTs are stateless and
-/// not re-validated against the DB per request) — that is a pre-existing, accepted property of the access
-/// token design (15-minute default lifetime), not something this handler can or should work around.
+/// Also performs the session/security bookkeeping this codebase has for an admin reset (e.g. "device
+/// lost/stolen"), which serves audit + blocks the old device from re-activating the key — but does NOT
+/// cut off the old device's live access:
+///   - Rotates <see cref="User.SecurityStamp"/> and flips <see cref="ActivationStatus"/> back to
+///     <see cref="ActivationStatus.NotActivated"/>, so the old device cannot re-activate/re-bind the key
+///     again without an admin, and any future session-issue snapshots the new stamp.
+///   - Marks (<see cref="UserSession.RevokedAtUtc"/>) every currently-active session for this user revoked,
+///     the same pattern <c>LogoutHandler</c> uses — retained as an audit record of the reset.
+/// IMPORTANT: with permanent, stateless access tokens (there is no refresh flow, and JWTs are not
+/// re-validated against the DB per request), NONE of the above invalidates an access token already issued
+/// to the old device — that token keeps authenticating until its (far-future) expiry. This handler's
+/// revocation is therefore an audit/bookkeeping action plus a block on future re-activation, NOT an
+/// immediate cut-off of the old device's live access. That enforcement gap is an accepted property of the
+/// permanent-token design, not something this handler can or should work around.
 /// </summary>
 public class ResetUserActivationHandler(IamsDbContext db, ICurrentUser currentUser, IClock clock)
 {
@@ -87,9 +89,10 @@ public class ResetUserActivationHandler(IamsDbContext db, ICurrentUser currentUs
             user.ActivationResetAtUtc = now.UtcDateTime;
             user.ActivationResetByUserId = currentUser.UserId;
 
-            // Cut off the old device's access now, not just at its next natural refresh attempt (see the
-            // class doc comment). Re-queried fresh on every loop iteration, same as `user` above, so a
-            // retry after a lost concurrency race re-revokes against current state rather than a stale view.
+            // Rotate the stamp and revoke sessions for audit + to block the old device from re-activating
+            // (see the class doc comment — this does NOT invalidate an already-issued access token).
+            // Re-queried fresh on every loop iteration, same as `user` above, so a retry after a lost
+            // concurrency race re-revokes against current state rather than a stale view.
             user.SecurityStamp = Guid.NewGuid().ToString("N");
 
             var activeSessions = await db.UserSessions

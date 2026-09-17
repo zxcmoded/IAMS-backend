@@ -13,7 +13,6 @@ using IAMS.Api.Features.Access.EvaluateAccessBatch;
 using IAMS.Api.Features.Admin.ResetUserActivation;
 using IAMS.Api.Features.Auth.Activate;
 using IAMS.Api.Features.Auth.Logout;
-using IAMS.Api.Features.Auth.RefreshToken;
 using IAMS.Api.Features.MasterData.ListBins;
 using IAMS.Api.Features.MasterData.ListCompanies;
 using IAMS.Api.Features.MasterData.ListLocations;
@@ -95,7 +94,6 @@ public static class DependencyInjection
 
         // Feature handlers.
         services.AddScoped<ActivateHandler>();
-        services.AddScoped<RefreshTokenHandler>();
         services.AddScoped<LogoutHandler>();
         services.AddScoped<GetEffectiveScopeHandler>();
         services.AddScoped<EvaluateAccessHandler>();
@@ -174,7 +172,6 @@ public static class DependencyInjection
     public static IEndpointRouteBuilder MapIamsEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapActivateEndpoint();
-        app.MapRefreshTokenEndpoint();
         app.MapLogoutEndpoint();
         app.MapGetEffectiveScopeEndpoint();
         app.MapEvaluateAccessEndpoint();

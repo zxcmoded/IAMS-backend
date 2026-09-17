@@ -11,6 +11,10 @@ public interface ICurrentUser
     Guid TenantId { get; }
     Guid CompanyId { get; }
     Guid? LocationId { get; }
+
+    /// <summary>The issuing session's id (session_id claim), used to revoke that session on logout. Null if absent.</summary>
+    Guid? SessionId { get; }
+
     bool IsSystemAdmin { get; }
 }
 
@@ -34,6 +38,8 @@ public class CurrentUser : ICurrentUser
         ?? throw new InvalidOperationException("No company claim on the current request.");
 
     public Guid? LocationId => GetGuid(IamsClaims.LocationId);
+
+    public Guid? SessionId => GetGuid(IamsClaims.SessionId);
 
     public bool IsSystemAdmin => Principal?.FindFirst(IamsClaims.IsSystemAdmin)?.Value == "true";
 

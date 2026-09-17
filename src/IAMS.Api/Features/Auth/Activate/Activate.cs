@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore;
 namespace IAMS.Api.Features.Auth.Activate;
 
 // ── Contract ────────────────────────────────────────────────────────────────
-// DeviceId is REQUIRED (unlike the old LoginCommand/RefreshTokenCommand) — this is the ONLY
-// enforcement point for single-device binding, and a null device id cannot be bound to anything.
+// DeviceId is REQUIRED — this is the ONLY enforcement point for single-device binding, and a null
+// device id cannot be bound to anything.
 public record ActivateCommand(string ActivationKey, string DeviceId);
 
 public class ActivateValidator : AbstractValidator<ActivateCommand>
@@ -141,8 +141,6 @@ public class ActivateHandler(
                 session.AccessToken,
                 "Bearer",
                 session.AccessTokenExpiresAt,
-                session.RefreshToken,
-                session.RefreshTokenExpiresAt,
                 UserSummary.From(user)));
         }
 

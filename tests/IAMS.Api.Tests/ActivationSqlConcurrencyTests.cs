@@ -36,8 +36,7 @@ public class ActivationSqlConcurrencyTests
     private static readonly IOptions<JwtOptions> Options = Microsoft.Extensions.Options.Options.Create(new JwtOptions
     {
         SigningKey = "test-signing-key-that-is-long-enough-32b",
-        AccessTokenMinutes = 15,
-        RefreshTokenDays = 30
+        AccessTokenLifetimeDays = 36500
     });
 
     private static IamsDbContext NewContext() =>
@@ -84,7 +83,7 @@ public class ActivationSqlConcurrencyTests
         IamsDbContext db, FakeClock clock, string deviceId)
     {
         var handler = new ActivateHandler(
-            db, new SessionIssuer(db, new JwtTokenService(Options), clock, Options), new ActiveScopeResolver(db), clock);
+            db, new SessionIssuer(db, new JwtTokenService(Options), clock), new ActiveScopeResolver(db), clock);
         return handler.HandleAsync(new ActivateCommand(RawKey, deviceId), CancellationToken.None);
     }
 
