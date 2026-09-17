@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("IAMS.Api.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+32fdaf746ddec753c12d40f267c3b8911c5fa757")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4561453d5da60862109bb913014d96a73d853dcf")]
 [assembly: System.Reflection.AssemblyProductAttribute("IAMS.Api.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("IAMS.Api.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
