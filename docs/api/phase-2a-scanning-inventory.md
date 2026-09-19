@@ -87,7 +87,9 @@ Resolves one raw code and writes a `ScanEvent` audit row for every attempt (incl
 ## F4 — `GET /api/inventory/items`
 
 Online, reachable-scoped inventory listing for the F4 list screen. **Offset-paginated** (distinct from the
-offline sync feed, which rides the shared `SyncCursor` mechanism on `InventoryItems`/`StockLevels`).
+offline sync feed, which rides the shared `SyncCursor` mechanism on `InventoryItems`/`StockLevels` — now
+shipped as `GET /api/inventory/sync/items` + `GET /api/inventory/sync/stock-levels`, documented in
+`master-data-sync.md` → "Inventory Offline Sync").
 
 **Query params** (all optional)
 

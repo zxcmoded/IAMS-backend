@@ -188,3 +188,142 @@ The `syncCursorUtc` keyset value is a Postgres **stored generated column**
 stable, tie-broken ordering across page boundaries is verified against real PostgreSQL in
 `MasterDataSyncSqlIntegrationTests` (opt-in via `IAMS_PG_TEST_CONN`); handler-level filtering,
 pagination boundaries, and parent-ownership errors are covered in `MasterDataSyncHandlerTests`.
+
+---
+
+# Inventory Offline Sync (InventoryItems + StockLevels)
+
+Owner: `dotnet-backend-engineer`. Two more read-only, cursor-paginated feeds that hydrate the mobile
+Inventory module's local SQLite so the F4 list / detail / search / filter surfaces work **fully
+offline** without ever calling the interactive `GET /api/inventory/items` /
+`GET /api/inventory/items/{id}` endpoints. They are **the same sync mechanism** documented above —
+identical `SyncCursor` keyset cursor, identical `{ items, nextCursor, hasMore }` envelope, identical
+peek-ahead pagination, identical empty-page/soft-delete semantics, identical reachable-company
+scoping via enabled `CompanyConnection`s. Everything in the sections above (Scope, Response
+envelope, Pagination & incremental sync, Soft deletes) applies verbatim; only the routes, query
+params, and per-row DTO shapes differ, documented here.
+
+```
+GET /api/inventory/sync/items?cursor=&pageSize=
+GET /api/inventory/sync/stock-levels?cursor=&pageSize=
+```
+
+All `RequireAuthorization()`. Missing/expired token → `401` (no `code` body), same as every other
+feed.
+
+## Query parameters (all optional)
+
+| Param | Type | Default | Rules |
+|---|---|---|---|
+| `cursor` | string | absent | Opaque keyset cursor from a previous response's `nextCursor`. Absent/empty = start of the world (initial/full sync). A non-empty but malformed cursor → `400 validation_failed`. |
+| `pageSize` | int | `200` | `> 0` and `<= 500`. Out of range → `400 validation_failed`. |
+
+**There is no `parentId` on either feed** — both are scoped purely by the caller's reachable-company
+set (the denormalized `companyId` on each row), so neither has the parent-ownership `403`/`404`
+behavior the hierarchy child levels have.
+
+## Scope
+
+Same "reachable companies" set as the hierarchy feeds: the caller's home company plus every company
+reachable via an **enabled** `CompanyConnection`. `InventoryItems` filters on its own `companyId`;
+`StockLevels` filters on the `companyId` it denormalizes directly on the row (no join to the item or
+bin), exactly as `locations`/`bins` filter.
+
+## Response envelope
+
+Identical to the hierarchy feeds:
+
+```json
+{
+  "items": [ /* DTOs below, ordered by (syncCursorUtc, id) ascending */ ],
+  "nextCursor": "b64url-opaque-string-or-null",
+  "hasMore": true
+}
+```
+
+> **The resume cursor is the envelope's `nextCursor`, not a per-row field.** (The DTOs deliberately
+> carry no per-item cursor — this mirrors `CompanyDto` etc. exactly.)
+
+### `items` — DTOs (exact field names / types, System.Text.Json camelCase)
+
+```jsonc
+// GET /api/inventory/sync/items  → InventoryItemSyncDto
+{ "id": "guid",
+  "tenantId": "guid",
+  "companyId": "guid",
+  "sku": "SKU-1",
+  "barcode": "BC-1",          // string | null
+  "name": "Widget",
+  "description": "…",         // string | null
+  "unitOfMeasure": "EA",      // string | null
+  "category": "Fasteners",    // string | null
+  "isActive": true,
+  "createdAtUtc": "2026-01-01T00:00:00+00:00",
+  "updatedAtUtc": null }      // string(ISO-8601) | null  (syncCursor basis = COALESCE(updatedAtUtc, createdAtUtc))
+
+// GET /api/inventory/sync/stock-levels  → StockLevelSyncDto
+{ "id": "guid",
+  "inventoryItemId": "guid",
+  "binId": "guid",
+  "rackId": "guid",
+  "warehouseId": "guid",
+  "locationId": "guid",
+  "companyId": "guid",
+  "tenantId": "guid",
+  "quantityOnHand": 12.5,     // decimal, numeric(18,4)
+  "version": 7,               // long — app-managed monotonic counter; same value the mutation endpoints return
+  "createdAtUtc": "2026-01-01T00:00:00+00:00",
+  "updatedAtUtc": null }      // string(ISO-8601) | null
+```
+
+`version` is the field mobile already caches in `stock_version_cache` and stamps offline mutations
+with for conflict detection — the sync feed is now an authoritative source for it alongside the
+mutation responses. Search (SKU/name/barcode substring), the category filter dimension, and
+aggregate on-hand (summing `quantityOnHand` across an item's `StockLevels`) are all computed
+**client-side** from these two feeds; the server does not expose an aggregate here (that's what the
+interactive `GET /api/inventory/items` feed is for, and mobile no longer calls it during normal use).
+
+## Soft deletes
+
+Same rule as the hierarchy feeds: an `InventoryItem` with `isActive: false` is delivered in a normal
+page (never excluded) whenever its `syncCursorUtc` advances — upsert and mark inactive locally, never
+hard-delete on absence. `StockLevels` have no `isActive` flag (a bin's on-hand simply goes to `0`).
+
+## Errors
+
+| `code` | Status | Meaning / client action |
+|---|---|---|
+| `validation_failed` | 400 | `pageSize` out of `(0, 500]`, or a malformed `cursor`. |
+| (none) | 401 | Missing/expired access token (standard auth failure, no `code` body). |
+
+There is no `403`/`404` on these feeds (no `parentId`); rows outside the reachable-company set are
+simply never returned.
+
+## ⚠️ Out of scope this pass — movement history (`InventoryTransactions`)
+
+There is **deliberately no `GET /api/inventory/sync/transactions` feed** in this round. The ledger
+/ movement history is not synced offline. Practical effect: an offline item-detail screen's "recent
+movements" section will be empty/hidden. This is a documented, intentional gap (matches the team's
+existing sync-scope convention), not an omission to gold-plate — the schema already carries
+`IX_InventoryTransactions_Sync`, so adding the feed later is the same net-new-slice pattern with no
+migration.
+
+## Newly-reachable / disabled companies
+
+The same reachability caveats documented above for the hierarchy feeds apply here: a company becoming
+newly reachable (an admin enabling a `CompanyConnection`) does **not** advance any
+`InventoryItem`/`StockLevel` row's `syncCursorUtc`, so an incremental poll won't surface its
+inventory. Mobile's existing full-`companies`-diff → force-full-repull mitigation must extend to
+re-pulling these two feeds (`cursor=null`) for companies that newly appear, and the same
+not-yet-implemented client-side pruning gap applies on disable.
+
+## Notes for testing
+
+Both feeds reuse the shared `SyncCursor` / `MasterDataPaging` helpers over the existing
+`SyncCursorUtc` stored generated column and the `IX_InventoryItems_Sync` / `IX_StockLevels_Sync`
+keyset indexes (added in migration `20260916074619_AddInventoryAndScanning` — **no new migration**).
+Handler-level reachable-company scoping, DTO field integrity, peek-ahead pagination (no skip/dupe
+across pages), incremental cursor resume, and malformed-cursor → `400` are covered in
+`InventorySyncHandlerTests`; correct/stable/tie-broken keyset ordering, the generated-column
+regeneration, and physical index existence are verified against real PostgreSQL in
+`InventorySyncSqlIntegrationTests` (opt-in via `IAMS_PG_TEST_CONN`).

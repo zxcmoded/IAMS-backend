@@ -25,6 +25,8 @@ using IAMS.Api.Features.Inventory.GetInventoryItem;
 using IAMS.Api.Features.Inventory.ListInventory;
 using IAMS.Api.Features.Inventory.ReceiveStock;
 using IAMS.Api.Features.Inventory.RejectStockCount;
+using IAMS.Api.Features.Inventory.SyncItems;
+using IAMS.Api.Features.Inventory.SyncStockLevels;
 using IAMS.Api.Features.Inventory.TransferStock;
 using IAMS.Api.Features.Scanning.ResolveScan;
 using IAMS.Api.Features.Scope.GetEffectiveScope;
@@ -116,6 +118,8 @@ public static class DependencyInjection
         services.AddScoped<CreateStockCountHandler>();
         services.AddScoped<ApproveStockCountHandler>();
         services.AddScoped<RejectStockCountHandler>();
+        services.AddScoped<SyncItemsHandler>();
+        services.AddScoped<SyncStockLevelsHandler>();
 
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
 
@@ -193,6 +197,8 @@ public static class DependencyInjection
         app.MapCreateStockCountEndpoint();
         app.MapApproveStockCountEndpoint();
         app.MapRejectStockCountEndpoint();
+        app.MapSyncItemsEndpoint();
+        app.MapSyncStockLevelsEndpoint();
         return app;
     }
 }
