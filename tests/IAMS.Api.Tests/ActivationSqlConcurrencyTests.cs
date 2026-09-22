@@ -1,4 +1,3 @@
-using IAMS.Api.Common.Auth;
 using IAMS.Api.Common.Domain;
 using IAMS.Api.Common.Errors;
 using IAMS.Api.Common.Persistence;
@@ -57,24 +56,21 @@ public class ActivationSqlConcurrencyTests
         await db.Database.EnsureDeletedAsync();
         await db.Database.EnsureCreatedAsync();
 
-        var tenant = new Tenant { Id = Guid.NewGuid(), Name = "T", Kind = TenantKind.Parent };
-        var company = new Company { Id = Guid.NewGuid(), TenantId = tenant.Id, Name = "C" };
+        var company = new Company { Id = Guid.NewGuid(), Name = "C" };
         var user = new User
         {
             Id = Guid.NewGuid(),
             Username = "race",
+            CompanyId = company.Id,
+            Role = UserRole.User,
             ActivationKeyHash = TokenGenerator.Sha256(RawKey),
             ActivationStatus = ActivationStatus.NotActivated,
             SecurityStamp = Guid.NewGuid().ToString("N"),
             IsActive = true
         };
         initialState?.Invoke(user);
-        var membership = new UserCompanyMembership
-        {
-            Id = Guid.NewGuid(), UserId = user.Id, CompanyId = company.Id, IsPrimary = true
-        };
 
-        db.AddRange(tenant, company, user, membership);
+        db.AddRange(company, user);
         await db.SaveChangesAsync();
         return new Seed(user.Id);
     }
@@ -83,7 +79,7 @@ public class ActivationSqlConcurrencyTests
         IamsDbContext db, FakeClock clock, string deviceId)
     {
         var handler = new ActivateHandler(
-            db, new SessionIssuer(db, new JwtTokenService(Options), clock), new ActiveScopeResolver(db), clock);
+            db, new SessionIssuer(db, new JwtTokenService(Options), clock), clock);
         return handler.HandleAsync(new ActivateCommand(RawKey, deviceId), CancellationToken.None);
     }
 

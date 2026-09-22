@@ -20,7 +20,6 @@ namespace IAMS.Api.Features.Inventory.SyncItems;
 /// </summary>
 public record InventoryItemSyncDto(
     Guid Id,
-    Guid TenantId,
     Guid CompanyId,
     string Sku,
     string? Barcode,
@@ -46,14 +45,16 @@ public class SyncItemsQueryValidator : AbstractValidator<SyncItemsQuery>
 
 // ── Handler ─────────────────────────────────────────────────────────────────
 /// <summary>
-/// Cursor-paginated offline sync feed for <c>InventoryItems</c>, reachable-company scoped via
-/// <see cref="AccessCheckService"/> — the same keyset mechanism the master-data hierarchy feeds use
+/// Cursor-paginated offline sync feed for <c>InventoryItems</c>, Company scoped via
+/// <see cref="AccessScopeResolver"/> — the same keyset mechanism the master-data hierarchy feeds use
 /// (<see cref="SyncCursor"/> + <see cref="MasterDataPaging"/> over the <c>SyncCursorUtc</c> shadow column and
-/// <c>IX_InventoryItems_Sync</c> index). Distinct from the interactive <c>ListInventory</c> query surface:
-/// this feed exists solely to hydrate the mobile SQLite cache, so it returns raw master fields (no aggregate
-/// on-hand) and delivers inactive/soft-deleted rows too, so the client can converge deletions.
+/// <c>IX_InventoryItems_Sync</c> index). The SKU catalog is Company-level master data (an item is not bound
+/// to a Location), so it is scoped by Company, not by assigned Location. Distinct from the interactive
+/// <c>ListInventory</c> query surface: this feed exists solely to hydrate the mobile SQLite cache, so it
+/// returns raw master fields (no aggregate on-hand) and delivers inactive/soft-deleted rows too, so the
+/// client can converge deletions.
 /// </summary>
-public class SyncItemsHandler(IamsDbContext db, AccessCheckService accessCheck)
+public class SyncItemsHandler(IamsDbContext db, AccessScopeResolver scopeResolver)
 {
     public async Task<Results<Ok<MasterDataPage<InventoryItemSyncDto>>, ProblemHttpResult>> HandleAsync(
         SyncItemsQuery query, CancellationToken ct)
@@ -63,11 +64,16 @@ public class SyncItemsHandler(IamsDbContext db, AccessCheckService accessCheck)
             return ApiError.Problem(StatusCodes.Status400BadRequest, ErrorCodes.ValidationFailed, "Malformed cursor.");
         }
 
-        var reachable = (await accessCheck.GetReachableCompanyIdsAsync(ct)).ToArray();
+        var scope = await scopeResolver.ResolveAsync(ct);
         var take = query.PageSize ?? MasterDataPaging.DefaultPageSize;
 
-        var rows = await db.InventoryItems.AsNoTracking()
-            .Where(i => reachable.Contains(i.CompanyId))
+        var q = db.InventoryItems.AsNoTracking();
+        if (!scope.SystemWide)
+        {
+            q = q.Where(i => i.CompanyId == scope.CompanyId);
+        }
+
+        var rows = await q
             .Where(i => EF.Property<DateTime>(i, SyncCursor.ColumnName) > ts
                      || (EF.Property<DateTime>(i, SyncCursor.ColumnName) == ts && i.Id.CompareTo(id) > 0))
             .OrderBy(i => EF.Property<DateTime>(i, SyncCursor.ColumnName)).ThenBy(i => i.Id)
@@ -76,7 +82,7 @@ public class SyncItemsHandler(IamsDbContext db, AccessCheckService accessCheck)
             {
                 Cursor = EF.Property<DateTime>(i, SyncCursor.ColumnName),
                 Dto = new InventoryItemSyncDto(
-                    i.Id, i.TenantId, i.CompanyId, i.Sku, i.Barcode, i.Name, i.Description,
+                    i.Id, i.CompanyId, i.Sku, i.Barcode, i.Name, i.Description,
                     i.UnitOfMeasure, i.Category, i.IsActive, i.CreatedAtUtc, i.UpdatedAtUtc)
             })
             .ToListAsync(ct);

@@ -1,11 +1,12 @@
 namespace IAMS.Api.Common.Domain;
 
 /// <summary>
-/// An authenticated session, carrying the resolved active scope: active company and active
-/// location/store. Retained for audit/session bookkeeping (activation reset and logout mark it revoked);
-/// there is no refresh token — access tokens are permanent-per-device and authenticate on their own.
-/// Cross-tenant connection scope is resolved dynamically per request against the connection tables, never
-/// frozen here, so policy changes are honored without re-issuing the session (BR-TC-007).
+/// An authenticated session, retained for audit/session bookkeeping (activation reset and logout mark it
+/// revoked). There is no refresh token — access tokens are permanent-per-device and authenticate on their
+/// own. The session no longer carries an "active company/location" scope: a user has exactly one Company
+/// (<see cref="User.CompanyId"/>) and a fixed set of assigned Locations, so there is nothing to switch
+/// between and nothing to freeze here — access is evaluated live per request against the user's Company +
+/// assigned Locations.
 /// </summary>
 public class UserSession
 {
@@ -14,19 +15,9 @@ public class UserSession
     public Guid UserId { get; set; }
     public User User { get; set; } = null!;
 
-    /// <summary>Active company scope resolved at activation (BR-002).</summary>
-    public Guid ActiveCompanyId { get; set; }
-    public Company ActiveCompany { get; set; } = null!;
-
-    /// <summary>Active location/store scope; null = company-wide.</summary>
-    public Guid? ActiveLocationId { get; set; }
-    public Location? ActiveLocation { get; set; }
-
     /// <summary>
     /// Snapshot of the user's <see cref="Domain.User.SecurityStamp"/> at issue time, kept as session/audit
-    /// metadata. No longer enforced: the check that rejected a session when this stamp no longer matched
-    /// the user's current one lived in the refresh flow, which has been removed — rotating the stamp
-    /// (forced logout, activation reset, etc.) no longer invalidates outstanding sessions.
+    /// metadata. Not enforced on the stateless permanent access token.
     /// </summary>
     public string SecurityStamp { get; set; } = string.Empty;
 

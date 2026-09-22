@@ -32,7 +32,7 @@ public class InventorySyncSqlIntegrationTests
     private static readonly DateTime T0 = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     private sealed record Seed(
-        Guid TenantId, Guid CompanyId, IReadOnlyList<Guid> ItemIds, IReadOnlyList<Guid> StockIds);
+        Guid CompanyId, IReadOnlyList<Guid> ItemIds, IReadOnlyList<Guid> StockIds);
 
     /// <summary>
     /// Seeds one company with inventory items and stock levels spanning: CreatedAtUtc-only rows, an
@@ -46,15 +46,14 @@ public class InventorySyncSqlIntegrationTests
         await db.Database.EnsureDeletedAsync();
         await db.Database.EnsureCreatedAsync();
 
-        var tenant = new Tenant { Id = Guid.NewGuid(), Name = "T", Kind = TenantKind.Parent };
-        var company = new Company { Id = Guid.NewGuid(), TenantId = tenant.Id, Name = "Co", CreatedAtUtc = T0 };
-        var location = new Location { Id = Guid.NewGuid(), Name = "L", TenantId = tenant.Id, CompanyId = company.Id };
-        var warehouse = new Warehouse { Id = Guid.NewGuid(), Name = "W", TenantId = tenant.Id, LocationId = location.Id, CompanyId = company.Id };
-        var rack = new Rack { Id = Guid.NewGuid(), Name = "R", TenantId = tenant.Id, WarehouseId = warehouse.Id, LocationId = location.Id, CompanyId = company.Id };
+        var company = new Company { Id = Guid.NewGuid(), Name = "Co", CreatedAtUtc = T0 };
+        var location = new Location { Id = Guid.NewGuid(), Name = "L", CompanyId = company.Id };
+        var warehouse = new Warehouse { Id = Guid.NewGuid(), Name = "W", LocationId = location.Id, CompanyId = company.Id };
+        var rack = new Rack { Id = Guid.NewGuid(), Name = "R", WarehouseId = warehouse.Id, LocationId = location.Id, CompanyId = company.Id };
 
         Bin MakeBin(string n) => new()
         {
-            Id = Guid.NewGuid(), Name = n, TenantId = tenant.Id, CompanyId = company.Id,
+            Id = Guid.NewGuid(), Name = n, CompanyId = company.Id,
             LocationId = location.Id, WarehouseId = warehouse.Id, RackId = rack.Id
         };
         var binA = MakeBin("BIN-A");
@@ -65,7 +64,7 @@ public class InventorySyncSqlIntegrationTests
 
         InventoryItem Item(string sku, DateTime created, DateTime? updated) => new()
         {
-            Id = Guid.NewGuid(), TenantId = tenant.Id, CompanyId = company.Id,
+            Id = Guid.NewGuid(), CompanyId = company.Id,
             Sku = sku, Name = $"Item {sku}", IsActive = true, CreatedAtUtc = created, UpdatedAtUtc = updated
         };
         var i1 = Item("i1", T0.AddDays(1), null);          // cursor = created (T0+1)
@@ -81,7 +80,7 @@ public class InventorySyncSqlIntegrationTests
         {
             Id = Guid.NewGuid(), InventoryItemId = item.Id, BinId = bin.Id,
             RackId = rack.Id, WarehouseId = warehouse.Id, LocationId = location.Id,
-            CompanyId = company.Id, TenantId = tenant.Id,
+            CompanyId = company.Id,
             QuantityOnHand = qty, Version = version, CreatedAtUtc = created, UpdatedAtUtc = updated
         };
         var s1 = Stock(i1, binA, 10m, 1, T0.AddDays(1), null);           // cursor = created
@@ -91,25 +90,25 @@ public class InventorySyncSqlIntegrationTests
         var sTieB = Stock(iTieB, binE, 50m, 1, T0.AddDays(3), null);     // cursor = T0+3 ┘ tie, distinct Id
         var stock = new[] { s1, s2, s3, sTieA, sTieB };
 
-        db.AddRange(tenant, company, location, warehouse, rack);
+        db.AddRange(company, location, warehouse, rack);
         db.AddRange(bins);
         db.AddRange(items);
         db.AddRange(stock);
         await db.SaveChangesAsync();
 
-        return new Seed(tenant.Id, company.Id, items.Select(i => i.Id).ToList(), stock.Select(s => s.Id).ToList());
+        return new Seed(company.Id, items.Select(i => i.Id).ToList(), stock.Select(s => s.Id).ToList());
     }
 
     private static SyncItemsHandler ItemsHandler(IamsDbContext db, Seed seed) =>
-        new(db, new AccessCheckService(db, new FakeCurrentUser
+        new(db, new AccessScopeResolver(db, new FakeCurrentUser
         {
-            UserId = Guid.NewGuid(), TenantId = seed.TenantId, CompanyId = seed.CompanyId
+            UserId = Guid.NewGuid(), CompanyId = seed.CompanyId, Role = UserRole.Admin
         }));
 
     private static SyncStockLevelsHandler StockHandler(IamsDbContext db, Seed seed) =>
-        new(db, new AccessCheckService(db, new FakeCurrentUser
+        new(db, new AccessScopeResolver(db, new FakeCurrentUser
         {
-            UserId = Guid.NewGuid(), TenantId = seed.TenantId, CompanyId = seed.CompanyId
+            UserId = Guid.NewGuid(), CompanyId = seed.CompanyId, Role = UserRole.Admin
         }));
 
     [Fact]

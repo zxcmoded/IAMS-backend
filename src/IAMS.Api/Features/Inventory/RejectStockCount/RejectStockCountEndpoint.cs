@@ -1,3 +1,4 @@
+using IAMS.Api.Common.Access;
 using FluentValidation;
 using IAMS.Api.Common.Errors;
 
@@ -23,7 +24,7 @@ public static class RejectStockCountEndpoint
 
             return await handler.HandleAsync(id, command, ct);
         })
-        .RequireAuthorization()
+        .RequireAuthorization(Policies.ManageInventory)
         .WithName("RejectStockCount")
         .WithTags("Inventory");
     }

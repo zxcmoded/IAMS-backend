@@ -1,3 +1,4 @@
+using IAMS.Api.Common.Access;
 using FluentValidation;
 using IAMS.Api.Common.Errors;
 
@@ -21,7 +22,7 @@ public static class CreateStockCountEndpoint
 
             return await handler.HandleAsync(command, ct);
         })
-        .RequireAuthorization()
+        .RequireAuthorization(Policies.Write)
         .WithName("CreateStockCount")
         .WithTags("Inventory");
     }

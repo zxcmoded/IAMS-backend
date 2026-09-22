@@ -1,16 +1,14 @@
 using System.Security.Claims;
-using IAMS.Api.Common.Auth;
+using IAMS.Api.Common.Access;
 using IAMS.Api.Common.Domain;
 using IAMS.Api.Common.Persistence;
 using IAMS.Api.Common.Security;
-using IAMS.Api.Common.Time;
 using IAMS.Api.Features.Admin.ResetUserActivation;
 using IAMS.Api.Features.Auth;
 using IAMS.Api.Features.Auth.Activate;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -19,10 +17,9 @@ namespace IAMS.Api.Tests;
 
 /// <summary>
 /// Activation Key authentication: the single-credential activate flow (<see cref="ActivateHandler"/>),
-/// its single-device enforcement, the admin reset slice, and the "SystemAdmin" authorization policy that
-/// gates it. Replaces the old Login/2FA/UserDeviceBinding coverage now that the User table carries
-/// activation/device-binding fields directly (see <see cref="User"/>'s doc comment for why the only race
-/// shape left is a plain UPDATE-vs-UPDATE conflict on that row).
+/// its single-device enforcement, the admin reset slice, and the role-based authorization policy that
+/// gates it. Every user now belongs to exactly one Company (non-nullable FK) and holds one
+/// <see cref="UserRole"/>, so there is no "no active company" branch to guard.
 /// </summary>
 public class ActivationTests
 {
@@ -37,31 +34,25 @@ public class ActivationTests
     private static async Task<(IamsDbContext Db, User User)> SeedUserAsync(string rawKey = RawKey, bool isActive = true)
     {
         var db = TestDb.New();
-        var tenant = new Tenant { Id = Guid.NewGuid(), Name = "T", Kind = TenantKind.Parent };
-        var company = new Company { Id = Guid.NewGuid(), TenantId = tenant.Id, Name = "C" };
+        var company = new Company { Id = Guid.NewGuid(), Name = "C" };
         var user = new User
         {
             Id = Guid.NewGuid(),
             Username = "alice",
+            CompanyId = company.Id,
+            Role = UserRole.User,
             ActivationKeyHash = TokenGenerator.Sha256(rawKey),
             ActivationStatus = ActivationStatus.NotActivated,
             SecurityStamp = Guid.NewGuid().ToString("N"),
             IsActive = isActive
         };
-        var membership = new UserCompanyMembership
-        {
-            Id = Guid.NewGuid(),
-            UserId = user.Id,
-            CompanyId = company.Id,
-            IsPrimary = true
-        };
-        db.AddRange(tenant, company, user, membership);
+        db.AddRange(company, user);
         await db.SaveChangesAsync();
         return (db, user);
     }
 
     private static ActivateHandler NewActivate(IamsDbContext db, FakeClock clock) =>
-        new(db, new SessionIssuer(db, new JwtTokenService(Options), clock), new ActiveScopeResolver(db), clock);
+        new(db, new SessionIssuer(db, new JwtTokenService(Options), clock), clock);
 
     [Fact]
     public async Task Activate_FreshKey_BindsDeviceAndIssuesSession()
@@ -71,8 +62,11 @@ public class ActivationTests
 
         var result = await NewActivate(db, clock).HandleAsync(new ActivateCommand(RawKey, "device-1"), CancellationToken.None);
 
-        var ok = Assert.IsType<Ok<Features.Auth.AuthTokenResponse>>(result.Result);
+        var ok = Assert.IsType<Ok<AuthTokenResponse>>(result.Result);
         Assert.False(string.IsNullOrEmpty(ok.Value!.AccessToken));
+        // The auth response now carries the user's Company + role for the client.
+        Assert.Equal(200, ok.Value.User.Role.Code);
+        Assert.Equal("User", ok.Value.User.Role.Name);
 
         var user = db.Users.Single();
         Assert.Equal(ActivationStatus.Activated, user.ActivationStatus);
@@ -92,7 +86,7 @@ public class ActivationTests
         clock.Advance(TimeSpan.FromMinutes(10));
         var result = await NewActivate(db, clock).HandleAsync(new ActivateCommand(RawKey, "device-1"), CancellationToken.None);
 
-        Assert.IsType<Ok<Features.Auth.AuthTokenResponse>>(result.Result);
+        Assert.IsType<Ok<AuthTokenResponse>>(result.Result);
         var user = db.Users.Single();
         Assert.Equal(ActivationStatus.Activated, user.ActivationStatus);
         Assert.Equal("device-1", user.ActivatedDeviceId);
@@ -147,30 +141,6 @@ public class ActivationTests
     }
 
     [Fact]
-    public async Task Activate_NoCompanyMembership_Returns403NoActiveCompany()
-    {
-        var db = TestDb.New();
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            Username = "orphan",
-            ActivationKeyHash = TokenGenerator.Sha256(RawKey),
-            ActivationStatus = ActivationStatus.NotActivated,
-            SecurityStamp = Guid.NewGuid().ToString("N"),
-            IsActive = true
-        };
-        db.Users.Add(user);
-        await db.SaveChangesAsync();
-        var clock = new FakeClock(DateTimeOffset.UtcNow);
-
-        var result = await NewActivate(db, clock).HandleAsync(new ActivateCommand(RawKey, "device-1"), CancellationToken.None);
-
-        var problem = Assert.IsType<ProblemHttpResult>(result.Result);
-        Assert.Equal(StatusCodes.Status403Forbidden, problem.StatusCode);
-        Assert.Equal(IAMS.Api.Common.Errors.ErrorCodes.NoActiveCompany, problem.ProblemDetails.Extensions["code"]);
-    }
-
-    [Fact]
     public void ActivateValidator_RejectsMissingOrTooShortDeviceIdAndKey()
     {
         var validator = new ActivateValidator();
@@ -185,12 +155,14 @@ public class ActivationTests
 
     // ── Admin reset ──────────────────────────────────────────────────────────────────────────────────
 
+    private static FakeCurrentUser SuperAdmin() =>
+        new() { UserId = Guid.NewGuid(), CompanyId = Guid.NewGuid(), Role = UserRole.SuperAdmin };
+
     [Fact]
     public async Task ResetUserActivation_NoActiveActivation_Returns404()
     {
         var (db, user) = await SeedUserAsync();
-        var admin = new FakeCurrentUser { UserId = Guid.NewGuid(), IsSystemAdmin = true };
-        var handler = new ResetUserActivationHandler(db, admin, new FakeClock(DateTimeOffset.UtcNow));
+        var handler = new ResetUserActivationHandler(db, SuperAdmin(), new FakeClock(DateTimeOffset.UtcNow));
 
         var result = await handler.HandleAsync(new ResetUserActivationCommand(user.Id), CancellationToken.None);
 
@@ -203,8 +175,7 @@ public class ActivationTests
     public async Task ResetUserActivation_UnknownUser_Returns404()
     {
         var db = TestDb.New();
-        var admin = new FakeCurrentUser { UserId = Guid.NewGuid(), IsSystemAdmin = true };
-        var handler = new ResetUserActivationHandler(db, admin, new FakeClock(DateTimeOffset.UtcNow));
+        var handler = new ResetUserActivationHandler(db, SuperAdmin(), new FakeClock(DateTimeOffset.UtcNow));
 
         var result = await handler.HandleAsync(new ResetUserActivationCommand(Guid.NewGuid()), CancellationToken.None);
 
@@ -213,13 +184,26 @@ public class ActivationTests
     }
 
     [Fact]
+    public async Task ResetUserActivation_AdminFromDifferentCompany_Returns404()
+    {
+        // An Admin may only reset users in their own Company; a target elsewhere is "not found" to them.
+        var (db, user) = await SeedUserAsync();
+        var clock = new FakeClock(DateTimeOffset.UtcNow);
+        await NewActivate(db, clock).HandleAsync(new ActivateCommand(RawKey, "device-1"), CancellationToken.None);
+
+        var foreignAdmin = new FakeCurrentUser { UserId = Guid.NewGuid(), CompanyId = Guid.NewGuid(), Role = UserRole.Admin };
+        var handler = new ResetUserActivationHandler(db, foreignAdmin, clock);
+        var result = await handler.HandleAsync(new ResetUserActivationCommand(user.Id), CancellationToken.None);
+
+        var problem = Assert.IsType<ProblemHttpResult>(result.Result);
+        Assert.Equal(StatusCodes.Status404NotFound, problem.StatusCode);
+    }
+
+    [Fact]
     public async Task ResetUserActivation_ZeroGuid_Returns404_NotValidationError()
     {
-        // QA/code-review-flagged: the literal all-zero GUID is syntactically valid (just never a real
-        // user), so it must 404 exactly like any other non-existent id — not 400 validation_failed.
         var db = TestDb.New();
-        var admin = new FakeCurrentUser { UserId = Guid.NewGuid(), IsSystemAdmin = true };
-        var handler = new ResetUserActivationHandler(db, admin, new FakeClock(DateTimeOffset.UtcNow));
+        var handler = new ResetUserActivationHandler(db, SuperAdmin(), new FakeClock(DateTimeOffset.UtcNow));
 
         var command = new ResetUserActivationCommand(Guid.Empty);
         var validation = new ResetUserActivationValidator().Validate(command);
@@ -235,17 +219,12 @@ public class ActivationTests
     [Fact]
     public async Task ResetUserActivation_RevokesExistingSessionForAudit_AndRotatesSecurityStamp()
     {
-        // With permanent stateless tokens there is no refresh flow to block, but an admin reset must still
-        // perform the session/security bookkeeping: rotate the security stamp, flip the user back to
-        // NotActivated (so the old device cannot re-activate the key), and mark the existing session revoked
-        // as an audit record. It does NOT invalidate the already-issued access token (an accepted gap).
         var (db, user) = await SeedUserAsync();
         var clock = new FakeClock(DateTimeOffset.UtcNow);
         var originalStamp = user.SecurityStamp;
         await NewActivate(db, clock).HandleAsync(new ActivateCommand(RawKey, "device-1"), CancellationToken.None);
 
-        var admin = new FakeCurrentUser { UserId = Guid.NewGuid(), IsSystemAdmin = true };
-        var resetHandler = new ResetUserActivationHandler(db, admin, clock);
+        var resetHandler = new ResetUserActivationHandler(db, SuperAdmin(), clock);
         var resetResult = await resetHandler.HandleAsync(new ResetUserActivationCommand(user.Id), CancellationToken.None);
         Assert.IsType<Ok<ResetUserActivationResponse>>(resetResult.Result);
 
@@ -263,7 +242,7 @@ public class ActivationTests
         await NewActivate(db, clock).HandleAsync(new ActivateCommand(RawKey, "device-1"), CancellationToken.None);
 
         var adminId = Guid.NewGuid();
-        var admin = new FakeCurrentUser { UserId = adminId, IsSystemAdmin = true };
+        var admin = new FakeCurrentUser { UserId = adminId, CompanyId = Guid.NewGuid(), Role = UserRole.SuperAdmin };
         var resetHandler = new ResetUserActivationHandler(db, admin, clock);
         var resetResult = await resetHandler.HandleAsync(new ResetUserActivationCommand(user.Id), CancellationToken.None);
         Assert.IsType<Ok<ResetUserActivationResponse>>(resetResult.Result);
@@ -272,41 +251,38 @@ public class ActivationTests
         Assert.Equal(ActivationStatus.NotActivated, resetUser.ActivationStatus);
         Assert.Equal(adminId, resetUser.ActivationResetByUserId);
         Assert.NotNull(resetUser.ActivationResetAtUtc);
-        // Audit trail of the OLD registration is preserved until the next activation overwrites it.
         Assert.Equal("device-1", resetUser.ActivatedDeviceId);
 
-        // A reset user must NOT be treated as "already bound" — the new device is allowed through.
         var verifyResult = await NewActivate(db, clock).HandleAsync(new ActivateCommand(RawKey, "device-2"), CancellationToken.None);
 
-        Assert.IsType<Ok<Features.Auth.AuthTokenResponse>>(verifyResult.Result);
+        Assert.IsType<Ok<AuthTokenResponse>>(verifyResult.Result);
         var reactivated = db.Users.Single();
         Assert.Equal(user.Id, reactivated.Id); // same row, never duplicated
         Assert.Equal("device-2", reactivated.ActivatedDeviceId);
         Assert.Equal(ActivationStatus.Activated, reactivated.ActivationStatus);
-        // The prior reset's audit fields describe the OLD (now-superseded) registration and must not
-        // linger on the freshly re-activated binding.
         Assert.Null(reactivated.ActivationResetAtUtc);
         Assert.Null(reactivated.ActivationResetByUserId);
     }
 
     [Fact]
-    public async Task SystemAdminPolicy_DeniesWithoutClaim_AllowsWithClaim()
+    public async Task ManageCompanyPolicy_DeniesBelowAdmin_AllowsAdminAndAbove()
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddAuthorizationCore(options =>
-            options.AddPolicy("SystemAdmin", p => p.RequireClaim(IamsClaims.IsSystemAdmin, "true")));
+        services.AddAuthorizationCore(options => options.AddIamsAuthorization());
         var provider = services.BuildServiceProvider();
         var authService = provider.GetRequiredService<IAuthorizationService>();
 
-        var nonAdmin = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub, Guid.NewGuid().ToString()) }, "Test"));
-        var deniedResult = await authService.AuthorizeAsync(nonAdmin, "SystemAdmin");
-        Assert.False(deniedResult.Succeeded);
+        ClaimsPrincipal WithRole(UserRole role) => new(new ClaimsIdentity(
+            new[] { new Claim(IamsClaims.Role, ((int)role).ToString()) }, "Test"));
 
-        var admin = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim(IamsClaims.IsSystemAdmin, "true") }, "Test"));
-        var allowedResult = await authService.AuthorizeAsync(admin, "SystemAdmin");
-        Assert.True(allowedResult.Succeeded);
+        Assert.False((await authService.AuthorizeAsync(WithRole(UserRole.Manager), Policies.ManageCompany)).Succeeded);
+        Assert.False((await authService.AuthorizeAsync(WithRole(UserRole.User), Policies.ManageCompany)).Succeeded);
+        Assert.True((await authService.AuthorizeAsync(WithRole(UserRole.Admin), Policies.ManageCompany)).Succeeded);
+        Assert.True((await authService.AuthorizeAsync(WithRole(UserRole.SuperAdmin), Policies.ManageCompany)).Succeeded);
+
+        // A Scanner (User) can write inventory but not manage; a Viewer cannot write.
+        Assert.True((await authService.AuthorizeAsync(WithRole(UserRole.User), Policies.Write)).Succeeded);
+        Assert.False((await authService.AuthorizeAsync(WithRole(UserRole.Viewer), Policies.Write)).Succeeded);
     }
 }

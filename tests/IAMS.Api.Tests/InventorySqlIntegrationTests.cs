@@ -30,7 +30,7 @@ public class InventorySqlIntegrationTests
 
     private static readonly DateTime T0 = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    private sealed record Seed(Guid TenantId, Guid CompanyId, Guid UserId, Guid ItemId, Guid BinAId, Guid BinBId);
+    private sealed record Seed(Guid CompanyId, Guid UserId, Guid ItemId, Guid BinAId, Guid BinBId);
 
     private static async Task<Seed> SeedAsync()
     {
@@ -38,15 +38,14 @@ public class InventorySqlIntegrationTests
         await db.Database.EnsureDeletedAsync();
         await db.Database.EnsureCreatedAsync();
 
-        var tenant = new Tenant { Id = Guid.NewGuid(), Name = "T", Kind = TenantKind.Parent };
-        var company = new Company { Id = Guid.NewGuid(), TenantId = tenant.Id, Name = "Co", CreatedAtUtc = T0 };
-        var location = new Location { Id = Guid.NewGuid(), Name = "L", TenantId = tenant.Id, CompanyId = company.Id };
-        var warehouse = new Warehouse { Id = Guid.NewGuid(), Name = "W", TenantId = tenant.Id, LocationId = location.Id, CompanyId = company.Id };
-        var rack = new Rack { Id = Guid.NewGuid(), Name = "R", TenantId = tenant.Id, WarehouseId = warehouse.Id, LocationId = location.Id, CompanyId = company.Id };
+        var company = new Company { Id = Guid.NewGuid(), Name = "Co", CreatedAtUtc = T0 };
+        var location = new Location { Id = Guid.NewGuid(), Name = "L", CompanyId = company.Id };
+        var warehouse = new Warehouse { Id = Guid.NewGuid(), Name = "W", LocationId = location.Id, CompanyId = company.Id };
+        var rack = new Rack { Id = Guid.NewGuid(), Name = "R", WarehouseId = warehouse.Id, LocationId = location.Id, CompanyId = company.Id };
 
         Bin MakeBin(string n) => new()
         {
-            Id = Guid.NewGuid(), Name = n, TenantId = tenant.Id, CompanyId = company.Id,
+            Id = Guid.NewGuid(), Name = n, CompanyId = company.Id,
             LocationId = location.Id, WarehouseId = warehouse.Id, RackId = rack.Id
         };
         var binA = MakeBin("BIN-A");
@@ -54,25 +53,25 @@ public class InventorySqlIntegrationTests
 
         var user = new User
         {
-            Id = Guid.NewGuid(), Username = "op", Email = "u@x.io",
+            Id = Guid.NewGuid(), Username = "op", Email = "u@x.io", CompanyId = company.Id, Role = UserRole.Admin,
             ActivationKeyHash = Guid.NewGuid().ToString("N"), IsActive = true, CreatedAtUtc = T0
         };
         var item = new InventoryItem
         {
-            Id = Guid.NewGuid(), TenantId = tenant.Id, CompanyId = company.Id,
+            Id = Guid.NewGuid(), CompanyId = company.Id,
             Sku = "SKU-1", Name = "Widget", IsActive = true, CreatedAtUtc = T0
         };
 
-        db.AddRange(tenant, company, location, warehouse, rack, binA, binB, user, item);
+        db.AddRange(company, location, warehouse, rack, binA, binB, user, item);
         await db.SaveChangesAsync();
 
-        return new Seed(tenant.Id, company.Id, user.Id, item.Id, binA.Id, binB.Id);
+        return new Seed(company.Id, user.Id, item.Id, binA.Id, binB.Id);
     }
 
     private static (StockMovementService movements, FakeCurrentUser user) Movements(IamsDbContext db, Seed s)
     {
-        var user = new FakeCurrentUser { UserId = s.UserId, TenantId = s.TenantId, CompanyId = s.CompanyId };
-        return (new StockMovementService(db, new AccessCheckService(db, user), user), user);
+        var user = new FakeCurrentUser { UserId = s.UserId, CompanyId = s.CompanyId, Role = UserRole.Admin };
+        return (new StockMovementService(db, new AccessScopeResolver(db, user), user), user);
     }
 
     [Fact]
@@ -86,7 +85,7 @@ public class InventorySqlIntegrationTests
         {
             Id = Guid.NewGuid(), InventoryItemId = s.ItemId, BinId = s.BinAId,
             RackId = Guid.NewGuid(), WarehouseId = Guid.NewGuid(), LocationId = Guid.NewGuid(),
-            CompanyId = s.CompanyId, TenantId = s.TenantId, QuantityOnHand = -1m, Version = 1
+            CompanyId = s.CompanyId, QuantityOnHand = -1m, Version = 1
         });
 
         var ex = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
@@ -103,7 +102,7 @@ public class InventorySqlIntegrationTests
         // A Receive with a SourceBin set violates CK_InvTxn_TypeShape (Receive must have NULL source).
         db.InventoryTransactions.Add(new InventoryTransaction
         {
-            Id = Guid.NewGuid(), TenantId = s.TenantId, CompanyId = s.CompanyId, InventoryItemId = s.ItemId,
+            Id = Guid.NewGuid(), CompanyId = s.CompanyId, InventoryItemId = s.ItemId,
             TransactionType = InventoryTransactionType.Receive,
             SourceBinId = s.BinAId, DestinationBinId = s.BinBId, Quantity = 1m,
             IdempotencyKey = "bad-shape", CreatedByUserId = s.UserId
@@ -181,7 +180,7 @@ public class InventorySqlIntegrationTests
         {
             db.StockCounts.Add(new StockCount
             {
-                Id = countId, TenantId = s.TenantId, CompanyId = s.CompanyId, InventoryItemId = s.ItemId, BinId = s.BinAId,
+                Id = countId, CompanyId = s.CompanyId, InventoryItemId = s.ItemId, BinId = s.BinAId,
                 RackId = Guid.NewGuid(), WarehouseId = Guid.NewGuid(), LocationId = Guid.NewGuid(),
                 CountedQuantity = 15m, SystemQuantity = 10m,
                 VarianceThreshold = 0m, VarianceThresholdType = VarianceThresholdType.AbsoluteQuantity,

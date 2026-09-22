@@ -1,3 +1,4 @@
+using IAMS.Api.Common.Domain;
 using IAMS.Api.Common.Persistence;
 using IAMS.Api.Common.Security;
 using IAMS.Api.Common.Time;
@@ -30,11 +31,9 @@ public sealed class FakeCurrentUser : ICurrentUser
 {
     public bool IsAuthenticated { get; set; } = true;
     public Guid UserId { get; set; }
-    public Guid TenantId { get; set; }
     public Guid CompanyId { get; set; }
-    public Guid? LocationId { get; set; }
+    public UserRole Role { get; set; } = UserRole.Admin;
     public Guid? SessionId { get; set; }
-    public bool IsSystemAdmin { get; set; }
 }
 
 public sealed class FakeHostEnvironment : IHostEnvironment

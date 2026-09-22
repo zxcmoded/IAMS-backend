@@ -15,7 +15,6 @@ public record RackDto(
     bool IsActive,
     DateTime CreatedAtUtc,
     DateTime? UpdatedAtUtc,
-    Guid TenantId,
     Guid WarehouseId,
     Guid LocationId,
     Guid CompanyId);
@@ -35,37 +34,46 @@ public class ListRacksQueryValidator : AbstractValidator<ListRacksQuery>
 }
 
 // ── Handler ─────────────────────────────────────────────────────────────────
-public class ListRacksHandler(IamsDbContext db, AccessCheckService accessCheck)
+public class ListRacksHandler(IamsDbContext db, AccessScopeResolver scopeResolver)
 {
     public async Task<Results<Ok<MasterDataPage<RackDto>>, ProblemHttpResult>> HandleAsync(
         ListRacksQuery query, CancellationToken ct)
     {
-        var reachable = (await accessCheck.GetReachableCompanyIdsAsync(ct)).ToArray();
+        var scope = await scopeResolver.ResolveAsync(ct);
+        var locationIds = scope.LocationIds;
         var take = query.PageSize ?? MasterDataPaging.DefaultPageSize;
         if (!SyncCursor.TryDecode(query.Cursor, out var ts, out var id))
         {
             return ApiError.Problem(StatusCodes.Status400BadRequest, ErrorCodes.ValidationFailed, "Malformed cursor.");
         }
 
-        // Parent (Warehouse) ownership: 404 if it doesn't exist, 403 if its company isn't reachable.
+        // Parent (Warehouse) ownership: 404 if it doesn't exist, 403 if it isn't in the caller's scope.
         if (query.ParentId is Guid pid)
         {
-            var parentCompanyId = await db.Warehouses.AsNoTracking()
-                .Where(w => w.Id == pid).Select(w => (Guid?)w.CompanyId).FirstOrDefaultAsync(ct);
-            if (parentCompanyId is null)
+            var parent = await db.Warehouses.AsNoTracking()
+                .Where(w => w.Id == pid).Select(w => new { w.CompanyId, w.LocationId }).FirstOrDefaultAsync(ct);
+            if (parent is null)
             {
                 return ApiError.Problem(StatusCodes.Status404NotFound, ErrorCodes.NotFound, "Parent warehouse not found.");
             }
-            if (!reachable.Contains(parentCompanyId.Value))
+            if (!scope.LocationInScope(parent.CompanyId, parent.LocationId))
             {
-                return ApiError.Problem(StatusCodes.Status403Forbidden, ErrorCodes.AccessDenied, "Parent warehouse is not reachable.");
+                return ApiError.Problem(StatusCodes.Status403Forbidden, ErrorCodes.AccessDenied, "Parent warehouse is not in your scope.");
             }
         }
 
-        var q = db.Racks.AsNoTracking().Where(x => reachable.Contains(x.CompanyId));
+        var q = db.Racks.AsNoTracking();
+        if (!scope.SystemWide)
+        {
+            q = q.Where(x => x.CompanyId == scope.CompanyId);
+        }
+        if (scope.LocationRestricted)
+        {
+            q = q.Where(x => locationIds.Contains(x.LocationId));
+        }
         if (query.ParentId is Guid parentId)
         {
-            q = q.Where(x => x.WarehouseId == parentId); // defense in depth on top of the reachable filter
+            q = q.Where(x => x.WarehouseId == parentId);
         }
 
         var rows = await q
@@ -76,7 +84,7 @@ public class ListRacksHandler(IamsDbContext db, AccessCheckService accessCheck)
             .Select(x => new
             {
                 Cursor = EF.Property<DateTime>(x, SyncCursor.ColumnName),
-                Dto = new RackDto(x.Id, x.Name, x.IsActive, x.CreatedAtUtc, x.UpdatedAtUtc, x.TenantId, x.WarehouseId, x.LocationId, x.CompanyId)
+                Dto = new RackDto(x.Id, x.Name, x.IsActive, x.CreatedAtUtc, x.UpdatedAtUtc, x.WarehouseId, x.LocationId, x.CompanyId)
             })
             .ToListAsync(ct);
 

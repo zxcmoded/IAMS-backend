@@ -17,7 +17,6 @@ public class InventoryItem
 {
     public Guid Id { get; set; }
 
-    public Guid TenantId { get; set; }
     public Guid CompanyId { get; set; }
     public Company Company { get; set; } = null!;
 
@@ -78,7 +77,6 @@ public class StockLevel
     public Guid WarehouseId { get; set; }
     public Guid LocationId { get; set; }
     public Guid CompanyId { get; set; }
-    public Guid TenantId { get; set; }
 
     public decimal QuantityOnHand { get; set; }
 
@@ -106,7 +104,6 @@ public class InventoryTransaction
 {
     public Guid Id { get; set; }
 
-    public Guid TenantId { get; set; }
     public Guid CompanyId { get; set; }
 
     public Guid InventoryItemId { get; set; }
@@ -177,7 +174,6 @@ public class StockCount
 {
     public Guid Id { get; set; }
 
-    public Guid TenantId { get; set; }
     public Guid CompanyId { get; set; }
 
     public Guid InventoryItemId { get; set; }
@@ -186,7 +182,7 @@ public class StockCount
     public Guid BinId { get; set; }
     public Bin Bin { get; set; } = null!;
 
-    // Denormalized ancestry (CompanyId/TenantId above complete the chain).
+    // Denormalized ancestry (CompanyId above completes the chain).
     public Guid RackId { get; set; }
     public Guid WarehouseId { get; set; }
     public Guid LocationId { get; set; }
@@ -240,7 +236,6 @@ public class InventorySettings
 {
     public Guid Id { get; set; }
 
-    public Guid TenantId { get; set; }
     public Guid CompanyId { get; set; }
     public Company Company { get; set; } = null!;
 

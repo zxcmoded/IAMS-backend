@@ -46,7 +46,7 @@ public class CreateStockCountValidator : AbstractValidator<CreateStockCountComma
 /// Idempotent by <c>IdempotencyKey</c> and version-checked against <see cref="StockLevel.Version"/> exactly like
 /// the movement slices.
 /// </summary>
-public class CreateStockCountHandler(IamsDbContext db, AccessCheckService accessCheck, ICurrentUser currentUser)
+public class CreateStockCountHandler(IamsDbContext db, AccessScopeResolver scopeResolver, ICurrentUser currentUser)
 {
     public async Task<Results<Ok<StockCountResponse>, ProblemHttpResult>> HandleAsync(
         CreateStockCountCommand command, CancellationToken ct)
@@ -60,18 +60,20 @@ public class CreateStockCountHandler(IamsDbContext db, AccessCheckService access
             return TypedResults.Ok(StockCountResponse.From(existing, version, replayed: true));
         }
 
-        var reachable = (await accessCheck.GetReachableCompanyIdsAsync(ct)).ToArray();
+        var scope = await scopeResolver.ResolveAsync(ct);
 
+        // The SKU is Company-level; the bin (and thus the count) is Location-bound — so the item is checked
+        // against the Company scope and the bin against the assigned-Location scope.
         var item = await db.InventoryItems.AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == command.InventoryItemId && reachable.Contains(i.CompanyId), ct);
-        if (item is null)
+            .FirstOrDefaultAsync(i => i.Id == command.InventoryItemId, ct);
+        if (item is null || !scope.CompanyInScope(item.CompanyId))
         {
             return ApiError.Problem(StatusCodes.Status404NotFound, ErrorCodes.NotFound, "Inventory item not found.");
         }
 
         var bin = await db.Bins.AsNoTracking()
-            .FirstOrDefaultAsync(b => b.Id == command.BinId && reachable.Contains(b.CompanyId), ct);
-        if (bin is null)
+            .FirstOrDefaultAsync(b => b.Id == command.BinId, ct);
+        if (bin is null || !scope.LocationInScope(bin.CompanyId, bin.LocationId))
         {
             return ApiError.Problem(StatusCodes.Status404NotFound, ErrorCodes.NotFound, "Bin not found.");
         }
@@ -115,7 +117,6 @@ public class CreateStockCountHandler(IamsDbContext db, AccessCheckService access
         var count = new StockCount
         {
             Id = Guid.NewGuid(),
-            TenantId = item.TenantId,
             CompanyId = item.CompanyId,
             InventoryItemId = item.Id,
             BinId = bin.Id,
@@ -145,7 +146,6 @@ public class CreateStockCountHandler(IamsDbContext db, AccessCheckService access
             var adjustment = new InventoryTransaction
             {
                 Id = Guid.NewGuid(),
-                TenantId = item.TenantId,
                 CompanyId = item.CompanyId,
                 InventoryItemId = item.Id,
                 TransactionType = InventoryTransactionType.Adjustment,

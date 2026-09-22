@@ -23,6 +23,22 @@ cleanly and is reversible.
 > the session record. Cross-tenant connection scope is resolved dynamically per request (not frozen
 > in the session) so policy changes are honored without re-issuing the session.
 
+> **2026-09-22 — Tenancy & access model restructured; Tenant + cross-company connections removed:**
+> `Tenants`, `CompanyConnections`, `CompanyConnectionScopes`, `CompanyConnectionFilters`, `Roles`, and
+> `UserCompanyMemberships` were **dropped** (migration `RemoveTenantAndCompanyConnections`), along with the
+> `TenantId` FK/denormalized-ancestry column on `Companies` and every hierarchy/inventory table below it, and
+> `UserSessions.ActiveCompanyId`/`ActiveLocationId`. **`Company` is now the top-level unit.** `Users` gained a
+> non-nullable **`CompanyId`** FK (a user belongs to exactly one Company) and an int-coded **`Role`** column
+> (`SuperAdmin=800, Admin=700, Manager=300, User=200, Viewer=100`, guarded by `CK_Users_Role`; **not** a lookup
+> table). A new **`UserLocationAssignments`** join table (unique `(UserId, LocationId)`) models the
+> many-to-many user↔Location assignment; data access is scoped to a user's Company and — for the
+> location-restricted roles (Manager/User/Viewer) — their assigned Locations. The `PolicyRevision`/`xmin`
+> machinery specific to connections is gone; the `xmin` token on `Users` and the inventory rows, and the
+> `SyncCursorUtc` generated columns, are unchanged. See `docs/api/tenancy-and-access-model.md` for the API
+> contract. **The `reference-model/` C# files below describe the pre-2026-09-22 (Tenant/connection) design and
+> are historical — the live model in `src/IAMS.Api` is the source of truth.** `Sections 1–7 below likewise
+> predate this change and are retained for historical context.`
+
 This document establishes the PostgreSQL / EF Core (Npgsql) conventions the `dotnet-backend-engineer`
 should build the persistence layer on. `initial-schema.sql` is the generated DDL for review.
 

@@ -73,7 +73,10 @@ public class ResetUserActivationHandler(IamsDbContext db, ICurrentUser currentUs
         {
             var user = await db.Users.FirstOrDefaultAsync(u => u.Id == command.UserId, ct);
 
-            if (user is null)
+            // An Admin may only reset users in their own Company; a target elsewhere is "not found" to them.
+            // SuperAdmin may reset any user.
+            if (user is null ||
+                (currentUser.Role != UserRole.SuperAdmin && user.CompanyId != currentUser.CompanyId))
             {
                 return ApiError.Problem(StatusCodes.Status404NotFound,
                     ErrorCodes.NotFound, "User not found.");

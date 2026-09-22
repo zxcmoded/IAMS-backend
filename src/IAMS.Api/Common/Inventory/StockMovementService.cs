@@ -53,10 +53,10 @@ public record MovementResult(StockMovementResponse? Success, MovementError? Erro
 /// <c>IdempotencyKey</c>, rejects a mutation built on a stale <see cref="StockLevel.Version"/> with a 409,
 /// pre-checks the non-negative invariant for a clean 4xx before the DB CHECK fires, writes the append-only
 /// ledger row, and mutates the affected <see cref="StockLevel"/> rows (whose <c>Version</c> is bumped centrally
-/// in <c>IamsDbContext</c>). Scope is resolved live off the caller's JWT + reachable-company set — a
-/// client-supplied tenant/company is never trusted.
+/// in <c>IamsDbContext</c>). Scope is resolved live off the caller's JWT (Company + assigned Locations) — a
+/// client-supplied company is never trusted, and the touched bins must be inside the caller's Location scope.
 /// </summary>
-public class StockMovementService(IamsDbContext db, AccessCheckService accessCheck, ICurrentUser currentUser)
+public class StockMovementService(IamsDbContext db, AccessScopeResolver scopeResolver, ICurrentUser currentUser)
 {
     public async Task<MovementResult> ApplyAsync(MovementRequest r, CancellationToken ct)
     {
@@ -68,20 +68,20 @@ public class StockMovementService(IamsDbContext db, AccessCheckService accessChe
             return Ok(await ReplayResponseAsync(existing, ct));
         }
 
-        var reachable = (await accessCheck.GetReachableCompanyIdsAsync(ct)).ToArray();
+        var scope = await scopeResolver.ResolveAsync(ct);
 
         var item = await db.InventoryItems.AsNoTracking()
-            .FirstOrDefaultAsync(i => i.Id == r.InventoryItemId && reachable.Contains(i.CompanyId), ct);
-        if (item is null)
+            .FirstOrDefaultAsync(i => i.Id == r.InventoryItemId, ct);
+        if (item is null || !scope.CompanyInScope(item.CompanyId))
         {
             return Err(new MovementError(StatusCodes.Status404NotFound, ErrorCodes.NotFound, "Inventory item not found."));
         }
 
-        // Resolve the bins the movement touches (each must be a real bin in the reachable set).
+        // Resolve the bins the movement touches (each must be a real bin inside the caller's Location scope).
         Bin? sourceBin = null, destBin = null;
         if (r.SourceBinId is Guid srcId)
         {
-            sourceBin = await LoadReachableBinAsync(srcId, reachable, ct);
+            sourceBin = await LoadScopedBinAsync(srcId, scope, ct);
             if (sourceBin is null)
             {
                 return Err(new MovementError(StatusCodes.Status404NotFound, ErrorCodes.NotFound, "Source bin not found."));
@@ -89,7 +89,7 @@ public class StockMovementService(IamsDbContext db, AccessCheckService accessChe
         }
         if (r.DestinationBinId is Guid dstId)
         {
-            destBin = await LoadReachableBinAsync(dstId, reachable, ct);
+            destBin = await LoadScopedBinAsync(dstId, scope, ct);
             if (destBin is null)
             {
                 return Err(new MovementError(StatusCodes.Status404NotFound, ErrorCodes.NotFound, "Destination bin not found."));
@@ -142,7 +142,6 @@ public class StockMovementService(IamsDbContext db, AccessCheckService accessChe
         var txn = new InventoryTransaction
         {
             Id = Guid.NewGuid(),
-            TenantId = item.TenantId,
             CompanyId = item.CompanyId,
             InventoryItemId = item.Id,
             TransactionType = r.Type,
@@ -192,9 +191,11 @@ public class StockMovementService(IamsDbContext db, AccessCheckService accessChe
             txn.Quantity, txn.AdjustmentReason, states, Replayed: false));
     }
 
-    private async Task<Bin?> LoadReachableBinAsync(Guid binId, Guid[] reachable, CancellationToken ct) =>
-        await db.Bins.AsNoTracking()
-            .FirstOrDefaultAsync(b => b.Id == binId && reachable.Contains(b.CompanyId), ct);
+    private async Task<Bin?> LoadScopedBinAsync(Guid binId, UserAccessScope scope, CancellationToken ct)
+    {
+        var bin = await db.Bins.AsNoTracking().FirstOrDefaultAsync(b => b.Id == binId, ct);
+        return bin is not null && scope.LocationInScope(bin.CompanyId, bin.LocationId) ? bin : null;
+    }
 
     private async Task<StockLevel> GetOrCreateStockAsync(InventoryItem item, Bin bin, CancellationToken ct)
     {

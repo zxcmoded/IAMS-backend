@@ -5,24 +5,25 @@ namespace IAMS.Api.Common.Domain;
 /// <see cref="Username"/>/<see cref="Email"/> are now purely display/contact fields — neither is used to
 /// look the user up at authentication time; the Activation Key is the only credential.
 ///
+/// A user belongs to exactly <b>one</b> <see cref="Company"/> (non-nullable <see cref="CompanyId"/> FK) and
+/// holds exactly one <see cref="Domain.UserRole"/>. Data access is scoped to that Company and — for the
+/// location-restricted roles (Manager / User / Viewer) — to the specific Locations assigned via
+/// <see cref="AssignedLocations"/>. <see cref="UserRole.Admin"/> sees all Locations in its Company;
+/// <see cref="UserRole.SuperAdmin"/> is not restricted by Company/Location at all.
+///
 /// Activation/device-binding fields live directly on this table (per spec) rather than a side table, and
 /// this entity's PostgreSQL <c>xmin</c> system column is configured as an optimistic-concurrency token
-/// (see <c>UserConfiguration</c> and <c>IamsDbContext.OnModelCreating</c> — same pattern previously proven
-/// on the old per-user device-binding table): activating a never-activated key and re-registering a
-/// key after an admin reset are BOTH plain UPDATEs to this same row (there is nothing to INSERT — the key
-/// already exists as a column here), so the only race shape that matters is two concurrent UPDATEs to the
-/// same row, which <c>xmin</c> turns into a catchable <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/>
-/// for the loser instead of a silently double-bound key. See <c>ActivateHandler</c>.
+/// (see <c>UserConfiguration</c> and <c>IamsDbContext.OnModelCreating</c>): activating a never-activated key
+/// and re-registering a key after an admin reset are BOTH plain UPDATEs to this same row, so the only race
+/// shape that matters is two concurrent UPDATEs to the same row, which <c>xmin</c> turns into a catchable
+/// <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/> for the loser instead of a
+/// silently double-bound key. See <c>ActivateHandler</c>.
 ///
 /// A reset (admin action, see <c>ResetUserActivationHandler</c>) flips <see cref="ActivationStatus"/> back
 /// to <see cref="Domain.ActivationStatus.NotActivated"/> without clearing <see cref="ActivatedDeviceId"/>/
 /// <see cref="ActivatedAtUtc"/> immediately — those are left as an audit trail (alongside
 /// <see cref="ActivationResetAtUtc"/>/<see cref="ActivationResetByUserId"/>) until the next successful
 /// activation overwrites them.
-///
-/// Deliberately does NOT include lockout mechanics — that policy is "Not Specified" upstream. The table is
-/// trivially extensible (nullable columns added later) so nothing here forecloses adding e.g.
-/// AccessFailedCount / LockoutEndUtc when the policy is defined.
 /// </summary>
 public class User
 {
@@ -33,13 +34,18 @@ public class User
 
     public string? Email { get; set; }
 
+    /// <summary>The single Company this user belongs to. Non-nullable — every user has exactly one Company.</summary>
+    public Guid CompanyId { get; set; }
+    public Company Company { get; set; } = null!;
+
+    /// <summary>The user's single role. Determines both privilege level and how data access is scoped.</summary>
+    public UserRole Role { get; set; } = UserRole.Viewer;
+
     /// <summary>
-    /// SHA-256 hash of the Activation Key — the ONLY credential. Looked up by exact hash match (same
-    /// deterministic-hash-for-lookup pattern as <see cref="Security.TokenGenerator.Sha256"/>), not PBKDF2:
-    /// the key itself is the row-selector (there
-    /// is no separate "username" to find the user by first), and a high-entropy, system/admin-provisioned
-    /// token does not need PBKDF2's slow, salted, "resist offline guessing of a low-entropy human secret"
-    /// property the way a user-chosen password would. The raw key is never persisted or logged.
+    /// SHA-256 hash of the Activation Key — the ONLY credential. Looked up by exact hash match, not PBKDF2:
+    /// the key itself is the row-selector (there is no separate "username" to find the user by first), and a
+    /// high-entropy, system/admin-provisioned token does not need PBKDF2's slow, salted resistance the way a
+    /// user-chosen password would. The raw key is never persisted or logged.
     /// </summary>
     public string ActivationKeyHash { get; set; } = string.Empty;
 
@@ -53,7 +59,7 @@ public class User
     /// <summary>When an admin last reset this user's activation; null while currently Activated.</summary>
     public DateTime? ActivationResetAtUtc { get; set; }
 
-    /// <summary>The admin (<see cref="IsSystemAdmin"/>) who performed the reset.</summary>
+    /// <summary>The admin who performed the reset.</summary>
     public Guid? ActivationResetByUserId { get; set; }
     public User? ActivationResetByUser { get; set; }
 
@@ -63,43 +69,27 @@ public class User
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAtUtc { get; set; }
 
-    /// <summary>
-    /// Platform-wide administrator flag, NOT scoped to any tenant/company (distinct from
-    /// <see cref="UserCompanyMembership.RoleId"/>, which is per-company). Gates the "SystemAdmin"
-    /// authorization policy. There is currently no admin-user-management feature to grant this — it is set
-    /// directly in the database.
-    /// </summary>
-    public bool IsSystemAdmin { get; set; }
+    /// <summary>The Locations this user is assigned to (many-to-many). Relevant for the location-restricted roles.</summary>
+    public ICollection<UserLocationAssignment> AssignedLocations { get; set; } = new List<UserLocationAssignment>();
 
-    public ICollection<UserCompanyMembership> Memberships { get; set; } = new List<UserCompanyMembership>();
     public ICollection<UserSession> Sessions { get; set; } = new List<UserSession>();
 }
 
 /// <summary>
-/// A role a user may hold within a company. Minimal scaffold so the unresolved "role may further restrict
-/// connection permissions" gap is not foreclosed (not enforced in Phase 1).
+/// Join row assigning a <see cref="User"/> to a <see cref="Location"/> within that user's Company. A user
+/// may be assigned to multiple Locations; access to location-bound data (warehouses, racks, bins, stock,
+/// counts, physical scans) is evaluated against exactly this assigned set for the location-restricted roles
+/// — no bleed into unassigned Locations of the same Company. Unique per (UserId, LocationId).
 /// </summary>
-public class Role
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string? Description { get; set; }
-}
-
-/// <summary>User's membership in one of their home-tenant companies, plus optional role.</summary>
-public class UserCompanyMembership
+public class UserLocationAssignment
 {
     public Guid Id { get; set; }
 
     public Guid UserId { get; set; }
     public User User { get; set; } = null!;
 
-    public Guid CompanyId { get; set; }
-    public Company Company { get; set; } = null!;
+    public Guid LocationId { get; set; }
+    public Location Location { get; set; } = null!;
 
-    public Guid? RoleId { get; set; }
-    public Role? Role { get; set; }
-
-    /// <summary>The user's default company when a session does not specify one.</summary>
-    public bool IsPrimary { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
 }

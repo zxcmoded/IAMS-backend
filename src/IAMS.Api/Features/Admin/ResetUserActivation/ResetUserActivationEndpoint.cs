@@ -1,4 +1,5 @@
 using FluentValidation;
+using IAMS.Api.Common.Access;
 using IAMS.Api.Common.Errors;
 
 namespace IAMS.Api.Features.Admin.ResetUserActivation;
@@ -22,7 +23,7 @@ public static class ResetUserActivationEndpoint
 
             return await handler.HandleAsync(command, ct);
         })
-        .RequireAuthorization("SystemAdmin")
+        .RequireAuthorization(Policies.ManageCompany)
         .WithName("ResetUserActivation")
         .WithTags("Admin");
     }

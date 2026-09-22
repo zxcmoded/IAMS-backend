@@ -39,26 +39,11 @@ internal static class NodeConfig
         b.HasKey(x => x.Id);
         b.Property(x => x.Name).HasMaxLength(200).IsRequired();
         b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
-        b.HasIndex(x => x.TenantId);
 
         // Sync-cursor shadow column + keyset index for master-data sync (per child level, scoped by CompanyId).
         b.Property<DateTime>(SyncCursorColumn);
         b.HasIndex("CompanyId", SyncCursorColumn, "Id")
             .HasDatabaseName($"IX_{b.Metadata.GetTableName()}_Sync");
-    }
-}
-
-public class TenantConfiguration : IEntityTypeConfiguration<Tenant>
-{
-    public void Configure(EntityTypeBuilder<Tenant> b)
-    {
-        b.ToTable("Tenants");
-        b.HasKey(x => x.Id);
-        b.Property(x => x.Name).HasMaxLength(200).IsRequired();
-        b.Property(x => x.Kind).HasConversion<string>().HasMaxLength(20);
-        b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
-        b.AddEnumCheck<TenantKind>(nameof(Tenant.Kind));
-        b.HasIndex(x => x.Kind);
     }
 }
 
@@ -70,9 +55,6 @@ public class CompanyConfiguration : IEntityTypeConfiguration<Company>
         b.HasKey(x => x.Id);
         b.Property(x => x.Name).HasMaxLength(200).IsRequired();
         b.Property(x => x.CreatedAtUtc).HasDefaultValueSql("now()");
-        b.HasOne(x => x.Tenant).WithMany(t => t.Companies)
-            .HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
-        b.HasIndex(x => x.TenantId);
 
         // Sync-cursor shadow column + keyset index (Company is not a HierarchyNode, so it's wired here).
         b.Property<DateTime>(NodeConfig.SyncCursorColumn);

@@ -3,13 +3,9 @@ using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using FluentValidation;
 using IAMS.Api.Common.Access;
-using IAMS.Api.Common.Auth;
-using IAMS.Api.Common.Connections;
 using IAMS.Api.Common.Persistence;
 using IAMS.Api.Common.Security;
 using IAMS.Api.Common.Time;
-using IAMS.Api.Features.Access.EvaluateAccess;
-using IAMS.Api.Features.Access.EvaluateAccessBatch;
 using IAMS.Api.Features.Admin.ResetUserActivation;
 using IAMS.Api.Features.Auth.Activate;
 using IAMS.Api.Features.Auth.Logout;
@@ -18,6 +14,8 @@ using IAMS.Api.Features.MasterData.ListCompanies;
 using IAMS.Api.Features.MasterData.ListLocations;
 using IAMS.Api.Features.MasterData.ListRacks;
 using IAMS.Api.Features.MasterData.ListWarehouses;
+using IAMS.Api.Features.Users.AssignUserLocations;
+using IAMS.Api.Features.Users.GetUserLocations;
 using IAMS.Api.Features.Inventory.AdjustStock;
 using IAMS.Api.Features.Inventory.ApproveStockCount;
 using IAMS.Api.Features.Inventory.CreateStockCount;
@@ -90,17 +88,15 @@ public static class DependencyInjection
         // Shared infrastructure services.
         services.AddSingleton<JwtTokenService>();
         services.AddScoped<SessionIssuer>();
-        services.AddScoped<ActiveScopeResolver>();
-        services.AddScoped<AccessCheckService>();
-        services.AddScoped<ConnectionPolicyService>();
+        services.AddScoped<AccessScopeResolver>();
 
         // Feature handlers.
         services.AddScoped<ActivateHandler>();
         services.AddScoped<LogoutHandler>();
         services.AddScoped<GetEffectiveScopeHandler>();
-        services.AddScoped<EvaluateAccessHandler>();
-        services.AddScoped<EvaluateAccessBatchHandler>();
         services.AddScoped<ResetUserActivationHandler>();
+        services.AddScoped<AssignUserLocationsHandler>();
+        services.AddScoped<GetUserLocationsHandler>();
         services.AddScoped<ListCompaniesHandler>();
         services.AddScoped<ListLocationsHandler>();
         services.AddScoped<ListWarehousesHandler>();
@@ -123,13 +119,10 @@ public static class DependencyInjection
 
         services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
 
-        // Platform-wide admin gate (Users.IsSystemAdmin), NOT scoped to any tenant/company. Distinct from
-        // per-company roles (UserCompanyMembership.RoleId), which are not enforced yet.
-        services.AddAuthorization(options =>
-        {
-            options.AddPolicy("SystemAdmin", policy =>
-                policy.RequireClaim(IamsClaims.IsSystemAdmin, "true"));
-        });
+        // Role-based authorization policies (minimum-role gates keyed off the JWT `role` int claim). See
+        // Policies for the mapping (read / write / manage_inventory / manage_company). Per-request
+        // Company/Location scoping is enforced separately in handlers via AccessScopeResolver.
+        services.AddAuthorization(options => options.AddIamsAuthorization());
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
             {
@@ -178,9 +171,9 @@ public static class DependencyInjection
         app.MapActivateEndpoint();
         app.MapLogoutEndpoint();
         app.MapGetEffectiveScopeEndpoint();
-        app.MapEvaluateAccessEndpoint();
-        app.MapEvaluateAccessBatchEndpoint();
         app.MapResetUserActivationEndpoint();
+        app.MapAssignUserLocationsEndpoint();
+        app.MapGetUserLocationsEndpoint();
         app.MapListCompaniesEndpoint();
         app.MapListLocationsEndpoint();
         app.MapListWarehousesEndpoint();

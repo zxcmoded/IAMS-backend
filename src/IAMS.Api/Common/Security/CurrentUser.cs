@@ -1,21 +1,19 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using IAMS.Api.Common.Domain;
 
 namespace IAMS.Api.Common.Security;
 
-/// <summary>Resolves the authenticated actor's identity and active scope from the current request's claims.</summary>
+/// <summary>Resolves the authenticated actor's identity and role/company from the current request's claims.</summary>
 public interface ICurrentUser
 {
     bool IsAuthenticated { get; }
     Guid UserId { get; }
-    Guid TenantId { get; }
     Guid CompanyId { get; }
-    Guid? LocationId { get; }
+    UserRole Role { get; }
 
     /// <summary>The issuing session's id (session_id claim), used to revoke that session on logout. Null if absent.</summary>
     Guid? SessionId { get; }
-
-    bool IsSystemAdmin { get; }
 }
 
 public class CurrentUser : ICurrentUser
@@ -31,17 +29,15 @@ public class CurrentUser : ICurrentUser
     public Guid UserId => GetGuid(JwtRegisteredClaimNames.Sub) ?? GetGuid(ClaimTypes.NameIdentifier)
         ?? throw new InvalidOperationException("No authenticated user id on the current request.");
 
-    public Guid TenantId => GetGuid(IamsClaims.TenantId)
-        ?? throw new InvalidOperationException("No tenant claim on the current request.");
-
     public Guid CompanyId => GetGuid(IamsClaims.CompanyId)
         ?? throw new InvalidOperationException("No company claim on the current request.");
 
-    public Guid? LocationId => GetGuid(IamsClaims.LocationId);
+    public UserRole Role =>
+        int.TryParse(Principal?.FindFirst(IamsClaims.Role)?.Value, out var code) && Enum.IsDefined(typeof(UserRole), code)
+            ? (UserRole)code
+            : throw new InvalidOperationException("No valid role claim on the current request.");
 
     public Guid? SessionId => GetGuid(IamsClaims.SessionId);
-
-    public bool IsSystemAdmin => Principal?.FindFirst(IamsClaims.IsSystemAdmin)?.Value == "true";
 
     private Guid? GetGuid(string claimType)
     {

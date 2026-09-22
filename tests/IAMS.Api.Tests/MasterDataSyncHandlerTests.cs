@@ -14,7 +14,7 @@ using Xunit;
 namespace IAMS.Api.Tests;
 
 /// <summary>
-/// In-memory handler tests for the five master-data listing slices: reachable-company filtering,
+/// In-memory handler tests for the five master-data listing slices: Company + assigned-Location scoping,
 /// peek-ahead keyset pagination boundaries, incremental cursor filtering, inactive-row delivery, and
 /// parent-ownership 403/404. The stored generated <c>SyncCursorUtc</c> column can't be evaluated by the
 /// in-memory provider, so the fixture seeds its shadow value explicitly (the real Postgres computation +
@@ -31,91 +31,88 @@ public class MasterDataSyncHandlerTests
         public required Guid HomeCompanyId { get; init; }
     }
 
-    private static Fixture NewFixture()
+    private static Fixture NewFixture(UserRole role = UserRole.Admin)
     {
         var db = TestDb.New();
-        var home = new Company { Id = Guid.NewGuid(), Name = "Home", TenantId = Guid.NewGuid(), CreatedAtUtc = T0 };
+        var home = new Company { Id = Guid.NewGuid(), Name = "Home", CreatedAtUtc = T0 };
         db.Add(home);
         SetCursor(db, home, T0);
         db.SaveChanges();
         return new Fixture
         {
             Db = db,
-            User = new FakeCurrentUser { UserId = Guid.NewGuid(), TenantId = home.TenantId, CompanyId = home.Id },
+            User = new FakeCurrentUser { UserId = Guid.NewGuid(), CompanyId = home.Id, Role = role },
             HomeCompanyId = home.Id
         };
     }
+
+    private static AccessScopeResolver Scope(Fixture f) => new(f.Db, f.User);
 
     private static void SetCursor(IamsDbContext db, object entity, DateTime cursor)
         => db.Entry(entity).Property(SyncCursor.ColumnName).CurrentValue = cursor;
 
     private static Company AddCompany(IamsDbContext db, string name, DateTime created, DateTime? updated = null, bool active = true)
     {
-        var c = new Company { Id = Guid.NewGuid(), Name = name, IsActive = active, CreatedAtUtc = created, UpdatedAtUtc = updated, TenantId = Guid.NewGuid() };
+        var c = new Company { Id = Guid.NewGuid(), Name = name, IsActive = active, CreatedAtUtc = created, UpdatedAtUtc = updated };
         db.Add(c);
         SetCursor(db, c, updated ?? created);
         return c;
     }
 
-    private static void Connect(IamsDbContext db, Guid source, Guid target, bool enabled)
-        => db.Add(new CompanyConnection
-        {
-            Id = Guid.NewGuid(),
-            SourceCompanyId = source,
-            TargetCompanyId = target,
-            ConnectionType = ConnectionType.ParentToChild,
-            IsEnabled = enabled,
-            PermissionLevel = PermissionLevel.Read,
-            PolicyRevision = 1
-        });
-
     private static Location AddLocation(IamsDbContext db, Guid companyId, string name, DateTime created, DateTime? updated = null, bool active = true)
     {
-        var l = new Location { Id = Guid.NewGuid(), CompanyId = companyId, Name = name, IsActive = active, CreatedAtUtc = created, UpdatedAtUtc = updated, TenantId = Guid.NewGuid() };
+        var l = new Location { Id = Guid.NewGuid(), CompanyId = companyId, Name = name, IsActive = active, CreatedAtUtc = created, UpdatedAtUtc = updated };
         db.Add(l);
         SetCursor(db, l, updated ?? created);
         return l;
     }
 
-    private static ListCompaniesHandler CompaniesHandler(Fixture f) => new(f.Db, new AccessCheckService(f.Db, f.User));
-    private static ListLocationsHandler LocationsHandler(Fixture f) => new(f.Db, new AccessCheckService(f.Db, f.User));
+    private static void AssignLocation(IamsDbContext db, Guid userId, Guid locationId)
+        => db.Add(new UserLocationAssignment { Id = Guid.NewGuid(), UserId = userId, LocationId = locationId, CreatedAtUtc = T0 });
+
+    private static ListCompaniesHandler CompaniesHandler(Fixture f) => new(f.Db, Scope(f));
+    private static ListLocationsHandler LocationsHandler(Fixture f) => new(f.Db, Scope(f));
 
     /// <summary>Runs the companies handler and unwraps the success page (asserting it wasn't a problem result).</summary>
     private static async Task<MasterDataPage<CompanyDto>> RunCompanies(Fixture f, ListCompaniesQuery q)
         => Assert.IsType<Ok<MasterDataPage<CompanyDto>>>((await CompaniesHandler(f).HandleAsync(q, default)).Result).Value!;
 
-    // ── Reachable-company filtering ───────────────────────────────────────────
+    // ── Company scoping ───────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Companies_ReturnsHome_PlusEnabledConnectionTarget_ExcludesDisabledAndUnconnected()
+    public async Task Companies_ScopedRole_ReturnsOnlyOwnCompany()
     {
-        var f = NewFixture();
-        var enabledTarget = AddCompany(f.Db, "Enabled", T0.AddDays(1));
-        var disabledTarget = AddCompany(f.Db, "Disabled", T0.AddDays(2));
-        var unconnected = AddCompany(f.Db, "Unconnected", T0.AddDays(3));
-        Connect(f.Db, f.HomeCompanyId, enabledTarget.Id, enabled: true);
-        Connect(f.Db, f.HomeCompanyId, disabledTarget.Id, enabled: false);
+        var f = NewFixture(); // Admin: scoped to own Company
+        AddCompany(f.Db, "Other", T0.AddDays(1));
+        await f.Db.SaveChangesAsync();
+
+        var page = await RunCompanies(f, new ListCompaniesQuery(null, null));
+
+        var row = Assert.Single(page.Items);
+        Assert.Equal(f.HomeCompanyId, row.Id);
+    }
+
+    [Fact]
+    public async Task Companies_SuperAdmin_SeesEveryCompany()
+    {
+        var f = NewFixture(UserRole.SuperAdmin);
+        var other = AddCompany(f.Db, "Other", T0.AddDays(1));
         await f.Db.SaveChangesAsync();
 
         var page = await RunCompanies(f, new ListCompaniesQuery(null, null));
 
         var ids = page.Items.Select(i => i.Id).ToHashSet();
-        Assert.Equal(new[] { f.HomeCompanyId, enabledTarget.Id }.ToHashSet(), ids);
-        Assert.DoesNotContain(disabledTarget.Id, ids);
-        Assert.DoesNotContain(unconnected.Id, ids);
+        Assert.Contains(f.HomeCompanyId, ids);
+        Assert.Contains(other.Id, ids);
     }
 
     [Fact]
-    public async Task Locations_AreFilteredByReachableCompany()
+    public async Task Locations_ScopedToOwnCompany()
     {
         var f = NewFixture();
-        var enabledTarget = AddCompany(f.Db, "Enabled", T0.AddDays(1));
-        var disabledTarget = AddCompany(f.Db, "Disabled", T0.AddDays(2));
-        Connect(f.Db, f.HomeCompanyId, enabledTarget.Id, enabled: true);
-        Connect(f.Db, f.HomeCompanyId, disabledTarget.Id, enabled: false);
+        var other = AddCompany(f.Db, "Other", T0.AddDays(1));
         var homeLoc = AddLocation(f.Db, f.HomeCompanyId, "HomeLoc", T0.AddDays(3));
-        var enabledLoc = AddLocation(f.Db, enabledTarget.Id, "EnabledLoc", T0.AddDays(4));
-        var disabledLoc = AddLocation(f.Db, disabledTarget.Id, "DisabledLoc", T0.AddDays(5));
+        var otherLoc = AddLocation(f.Db, other.Id, "OtherLoc", T0.AddDays(4));
         await f.Db.SaveChangesAsync();
 
         var result = await LocationsHandler(f).HandleAsync(new ListLocationsQuery(null, null, null), default);
@@ -123,22 +120,56 @@ public class MasterDataSyncHandlerTests
 
         var ids = ok.Value!.Items.Select(i => i.Id).ToHashSet();
         Assert.Contains(homeLoc.Id, ids);
-        Assert.Contains(enabledLoc.Id, ids);
-        Assert.DoesNotContain(disabledLoc.Id, ids);
+        Assert.DoesNotContain(otherLoc.Id, ids);
     }
 
-    // ── Peek-ahead pagination boundaries ──────────────────────────────────────
+    [Fact]
+    public async Task Locations_LocationRestrictedRole_SeesOnlyAssignedLocations()
+    {
+        var f = NewFixture(UserRole.User); // Scanner: restricted to assigned Locations
+        var assigned = AddLocation(f.Db, f.HomeCompanyId, "Assigned", T0.AddDays(1));
+        var unassigned = AddLocation(f.Db, f.HomeCompanyId, "Unassigned", T0.AddDays(2));
+        AssignLocation(f.Db, f.User.UserId, assigned.Id);
+        await f.Db.SaveChangesAsync();
+
+        var result = await LocationsHandler(f).HandleAsync(new ListLocationsQuery(null, null, null), default);
+        var ok = Assert.IsType<Ok<MasterDataPage<LocationDto>>>(result.Result);
+
+        var row = Assert.Single(ok.Value!.Items);
+        Assert.Equal(assigned.Id, row.Id);
+        Assert.DoesNotContain(unassigned.Id, ok.Value.Items.Select(i => i.Id));
+    }
+
+    [Fact]
+    public async Task Warehouses_LocationRestrictedRole_ExcludesUnassignedLocations()
+    {
+        var f = NewFixture(UserRole.User);
+        var assigned = AddLocation(f.Db, f.HomeCompanyId, "Assigned", T0.AddDays(1));
+        var unassigned = AddLocation(f.Db, f.HomeCompanyId, "Unassigned", T0.AddDays(2));
+        AssignLocation(f.Db, f.User.UserId, assigned.Id);
+        var whIn = AddWarehouse(f.Db, assigned.Id, f.HomeCompanyId, "In", T0.AddDays(3));
+        var whOut = AddWarehouse(f.Db, unassigned.Id, f.HomeCompanyId, "Out", T0.AddDays(4));
+        await f.Db.SaveChangesAsync();
+
+        var handler = new ListWarehousesHandler(f.Db, Scope(f));
+        var page = Assert.IsType<Ok<MasterDataPage<WarehouseDto>>>((await handler.HandleAsync(new ListWarehousesQuery(null, null, null), default)).Result).Value!;
+
+        var row = Assert.Single(page.Items);
+        Assert.Equal(whIn.Id, row.Id);
+        Assert.DoesNotContain(whOut.Id, page.Items.Select(i => i.Id));
+    }
+
+    // ── Peek-ahead pagination boundaries (SuperAdmin over many companies) ──────
 
     [Fact]
     public async Task Companies_PageSizeExactlyMatchesRowCount_HasMoreFalse()
     {
-        var f = NewFixture(); // home is 1 reachable company
+        var f = NewFixture(UserRole.SuperAdmin); // home + 4 others = 5 visible companies
         for (var i = 1; i <= 4; i++)
         {
-            var c = AddCompany(f.Db, $"C{i}", T0.AddDays(i));
-            Connect(f.Db, f.HomeCompanyId, c.Id, enabled: true);
+            AddCompany(f.Db, $"C{i}", T0.AddDays(i));
         }
-        await f.Db.SaveChangesAsync(); // 5 reachable companies total (home + 4)
+        await f.Db.SaveChangesAsync();
 
         var page = await RunCompanies(f, new ListCompaniesQuery(null, 5));
 
@@ -150,13 +181,12 @@ public class MasterDataSyncHandlerTests
     [Fact]
     public async Task Companies_MoreRowsThanPageSize_PagesThroughAllWithoutOverlap()
     {
-        var f = NewFixture();
+        var f = NewFixture(UserRole.SuperAdmin);
         for (var i = 1; i <= 4; i++)
         {
-            var c = AddCompany(f.Db, $"C{i}", T0.AddDays(i));
-            Connect(f.Db, f.HomeCompanyId, c.Id, enabled: true);
+            AddCompany(f.Db, $"C{i}", T0.AddDays(i));
         }
-        await f.Db.SaveChangesAsync(); // 5 reachable companies
+        await f.Db.SaveChangesAsync(); // 5 companies
 
         var page1 = await RunCompanies(f, new ListCompaniesQuery(null, 2));
         Assert.Equal(2, page1.Items.Count);
@@ -178,7 +208,7 @@ public class MasterDataSyncHandlerTests
     [Fact]
     public async Task Companies_EmptyPage_ReturnsNullCursor_Documented_MeansUnchanged()
     {
-        var f = NewFixture(); // only home
+        var f = NewFixture(); // only home is visible
         var first = await RunCompanies(f, new ListCompaniesQuery(null, 50));
         Assert.Single(first.Items);
 
@@ -194,19 +224,15 @@ public class MasterDataSyncHandlerTests
     [Fact]
     public async Task Companies_IncrementalCursor_ReturnsOnlyRowsAfterCursor_AcrossCreatedAndUpdated()
     {
-        var f = NewFixture();
-        // createdOnly cursor = created; updated cursor = its UpdatedAtUtc (later than created).
+        var f = NewFixture(UserRole.SuperAdmin);
         var createdOnly = AddCompany(f.Db, "CreatedOnly", created: T0.AddDays(1));
         var updatedLater = AddCompany(f.Db, "UpdatedLater", created: T0.AddDays(1), updated: T0.AddDays(10));
-        Connect(f.Db, f.HomeCompanyId, createdOnly.Id, enabled: true);
-        Connect(f.Db, f.HomeCompanyId, updatedLater.Id, enabled: true);
         await f.Db.SaveChangesAsync();
 
         // Cursor positioned just after createdOnly (T0+1 day, its Id) — should surface only updatedLater (T0+10).
         var cursor = SyncCursor.Encode(T0.AddDays(1), createdOnly.Id);
         var page = await RunCompanies(f, new ListCompaniesQuery(cursor, null));
 
-        // home (T0) and createdOnly (T0+1) are at/behind the cursor; updatedLater (T0+10) is ahead.
         Assert.Contains(updatedLater.Id, page.Items.Select(i => i.Id));
         Assert.DoesNotContain(createdOnly.Id, page.Items.Select(i => i.Id));
         Assert.DoesNotContain(f.HomeCompanyId, page.Items.Select(i => i.Id));
@@ -217,9 +243,8 @@ public class MasterDataSyncHandlerTests
     [Fact]
     public async Task Companies_InactiveRowsStillReturnedInPage()
     {
-        var f = NewFixture();
+        var f = NewFixture(UserRole.SuperAdmin);
         var inactive = AddCompany(f.Db, "SoftDeleted", T0.AddDays(1), active: false);
-        Connect(f.Db, f.HomeCompanyId, inactive.Id, enabled: true);
         await f.Db.SaveChangesAsync();
 
         var page = await RunCompanies(f, new ListCompaniesQuery(null, null));
@@ -242,13 +267,13 @@ public class MasterDataSyncHandlerTests
     }
 
     [Fact]
-    public async Task Locations_ParentCompanyUnreachable_Returns403AccessDenied()
+    public async Task Locations_ParentCompanyOutOfScope_Returns403AccessDenied()
     {
         var f = NewFixture();
-        var unreachable = AddCompany(f.Db, "Unreachable", T0.AddDays(1)); // exists but no enabled connection
+        var other = AddCompany(f.Db, "Other", T0.AddDays(1)); // exists but is a different Company
         await f.Db.SaveChangesAsync();
 
-        var result = await LocationsHandler(f).HandleAsync(new ListLocationsQuery(unreachable.Id, null, null), default);
+        var result = await LocationsHandler(f).HandleAsync(new ListLocationsQuery(other.Id, null, null), default);
 
         var problem = Assert.IsType<ProblemHttpResult>(result.Result);
         Assert.Equal(StatusCodes.Status403Forbidden, problem.StatusCode);
@@ -256,11 +281,10 @@ public class MasterDataSyncHandlerTests
     }
 
     [Fact]
-    public async Task Locations_ParentCompanyReachable_ScopesToThatCompanyOnly()
+    public async Task Locations_ParentCompanyInScope_ScopesToThatCompanyOnly()
     {
-        var f = NewFixture();
+        var f = NewFixture(UserRole.SuperAdmin);
         var other = AddCompany(f.Db, "Other", T0.AddDays(1));
-        Connect(f.Db, f.HomeCompanyId, other.Id, enabled: true);
         var homeLoc = AddLocation(f.Db, f.HomeCompanyId, "HomeLoc", T0.AddDays(2));
         var otherLoc = AddLocation(f.Db, other.Id, "OtherLoc", T0.AddDays(3));
         await f.Db.SaveChangesAsync();
@@ -276,23 +300,20 @@ public class MasterDataSyncHandlerTests
     // ── Child-level parent resolution uses the correct parent table/column ────
 
     [Fact]
-    public async Task Warehouses_ParentLocationUnreachable_Returns403_AndHappyPathFiltersByLocation()
+    public async Task Warehouses_ParentLocationOutOfScope_Returns403_AndHappyPathFiltersByLocation()
     {
         var f = NewFixture();
         var other = AddCompany(f.Db, "Other", T0.AddDays(1));
-        // Unreachable parent location (belongs to a company with no enabled connection).
         var otherLoc = AddLocation(f.Db, other.Id, "OtherLoc", T0.AddDays(2));
         await f.Db.SaveChangesAsync();
 
-        var handler = new ListWarehousesHandler(f.Db, new AccessCheckService(f.Db, f.User));
+        var handler = new ListWarehousesHandler(f.Db, Scope(f));
         var denied = await handler.HandleAsync(new ListWarehousesQuery(otherLoc.Id, null, null), default);
         Assert.Equal(StatusCodes.Status403Forbidden, Assert.IsType<ProblemHttpResult>(denied.Result).StatusCode);
 
-        // Happy path: a reachable location with a warehouse under it.
+        // Happy path: an in-scope location with a warehouse under it.
         var homeLoc = AddLocation(f.Db, f.HomeCompanyId, "HomeLoc", T0.AddDays(3));
-        var wh = new Warehouse { Id = Guid.NewGuid(), Name = "WH", LocationId = homeLoc.Id, CompanyId = f.HomeCompanyId, TenantId = Guid.NewGuid(), CreatedAtUtc = T0.AddDays(4) };
-        f.Db.Add(wh);
-        SetCursor(f.Db, wh, T0.AddDays(4));
+        var wh = AddWarehouse(f.Db, homeLoc.Id, f.HomeCompanyId, "WH", T0.AddDays(4));
         await f.Db.SaveChangesAsync();
 
         var ok = await handler.HandleAsync(new ListWarehousesQuery(homeLoc.Id, null, null), default);
@@ -307,31 +328,35 @@ public class MasterDataSyncHandlerTests
     {
         var f = NewFixture();
         var loc = AddLocation(f.Db, f.HomeCompanyId, "L", T0.AddDays(1));
-        var wh = new Warehouse { Id = Guid.NewGuid(), Name = "W", LocationId = loc.Id, CompanyId = f.HomeCompanyId, TenantId = Guid.NewGuid(), CreatedAtUtc = T0.AddDays(2) };
-        f.Db.Add(wh); SetCursor(f.Db, wh, T0.AddDays(2));
-        var rack = new Rack { Id = Guid.NewGuid(), Name = "R", WarehouseId = wh.Id, LocationId = loc.Id, CompanyId = f.HomeCompanyId, TenantId = Guid.NewGuid(), CreatedAtUtc = T0.AddDays(3) };
+        var wh = AddWarehouse(f.Db, loc.Id, f.HomeCompanyId, "W", T0.AddDays(2));
+        var rack = new Rack { Id = Guid.NewGuid(), Name = "R", WarehouseId = wh.Id, LocationId = loc.Id, CompanyId = f.HomeCompanyId, CreatedAtUtc = T0.AddDays(3) };
         f.Db.Add(rack); SetCursor(f.Db, rack, T0.AddDays(3));
-        var bin = new Bin { Id = Guid.NewGuid(), Name = "B", RackId = rack.Id, WarehouseId = wh.Id, LocationId = loc.Id, CompanyId = f.HomeCompanyId, TenantId = Guid.NewGuid(), CreatedAtUtc = T0.AddDays(4) };
+        var bin = new Bin { Id = Guid.NewGuid(), Name = "B", RackId = rack.Id, WarehouseId = wh.Id, LocationId = loc.Id, CompanyId = f.HomeCompanyId, CreatedAtUtc = T0.AddDays(4) };
         f.Db.Add(bin); SetCursor(f.Db, bin, T0.AddDays(4));
         await f.Db.SaveChangesAsync();
 
-        var racksHandler = new ListRacksHandler(f.Db, new AccessCheckService(f.Db, f.User));
+        var racksHandler = new ListRacksHandler(f.Db, Scope(f));
         var rackPage = Assert.IsType<Ok<MasterDataPage<RackDto>>>((await racksHandler.HandleAsync(new ListRacksQuery(wh.Id, null, null), default)).Result).Value!;
         var rackRow = Assert.Single(rackPage.Items);
         Assert.Equal(rack.Id, rackRow.Id);
         Assert.Equal(wh.Id, rackRow.WarehouseId);
 
-        var binsHandler = new ListBinsHandler(f.Db, new AccessCheckService(f.Db, f.User));
+        var binsHandler = new ListBinsHandler(f.Db, Scope(f));
         var binPage = Assert.IsType<Ok<MasterDataPage<BinDto>>>((await binsHandler.HandleAsync(new ListBinsQuery(rack.Id, null, null), default)).Result).Value!;
         var binRow = Assert.Single(binPage.Items);
         Assert.Equal(bin.Id, binRow.Id);
         Assert.Equal(rack.Id, binRow.RackId);
     }
 
+    private static Warehouse AddWarehouse(IamsDbContext db, Guid locationId, Guid companyId, string name, DateTime created)
+    {
+        var wh = new Warehouse { Id = Guid.NewGuid(), Name = name, LocationId = locationId, CompanyId = companyId, CreatedAtUtc = created };
+        db.Add(wh);
+        SetCursor(db, wh, created);
+        return wh;
+    }
+
     // ── Malformed cursor → 400 validation_failed (handler-level, per endpoint) ─
-    // QA gap: SyncCursor.TryDecode was unit-tested in isolation but its `false` return was discarded by
-    // every handler, so a malformed cursor was silently served a start-of-world page. These assert each
-    // handler actually maps that to 400 validation_failed.
 
     private const string MalformedCursor = "not-a-valid-cursor!!!";
 
@@ -362,7 +387,7 @@ public class MasterDataSyncHandlerTests
     public async Task Warehouses_MalformedCursor_Returns400ValidationFailed()
     {
         var f = NewFixture();
-        var handler = new ListWarehousesHandler(f.Db, new AccessCheckService(f.Db, f.User));
+        var handler = new ListWarehousesHandler(f.Db, Scope(f));
         var result = await handler.HandleAsync(new ListWarehousesQuery(null, MalformedCursor, null), default);
         AssertMalformedCursor(result.Result);
     }
@@ -371,7 +396,7 @@ public class MasterDataSyncHandlerTests
     public async Task Racks_MalformedCursor_Returns400ValidationFailed()
     {
         var f = NewFixture();
-        var handler = new ListRacksHandler(f.Db, new AccessCheckService(f.Db, f.User));
+        var handler = new ListRacksHandler(f.Db, Scope(f));
         var result = await handler.HandleAsync(new ListRacksQuery(null, MalformedCursor, null), default);
         AssertMalformedCursor(result.Result);
     }
@@ -380,7 +405,7 @@ public class MasterDataSyncHandlerTests
     public async Task Bins_MalformedCursor_Returns400ValidationFailed()
     {
         var f = NewFixture();
-        var handler = new ListBinsHandler(f.Db, new AccessCheckService(f.Db, f.User));
+        var handler = new ListBinsHandler(f.Db, Scope(f));
         var result = await handler.HandleAsync(new ListBinsQuery(null, MalformedCursor, null), default);
         AssertMalformedCursor(result.Result);
     }

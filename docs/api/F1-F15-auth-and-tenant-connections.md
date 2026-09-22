@@ -1,5 +1,14 @@
 # API Contract — F1 Authentication & 2FA + F15 Effective Access (Phase 1)
 
+> **SUPERSEDED (2026-09-22) — the Tenant / cross-company-connection model this document describes has
+> been removed entirely.** `Tenant`, `CompanyConnection`/`Scope`/`Filter`, the `ConnectionType`/`TenantKind`
+> enums, the `Role` lookup table, and `UserCompanyMembership` are gone. `Company` is now the top-level unit;
+> a user belongs to exactly one Company via a direct `CompanyId` FK, holds one int-coded `UserRole`
+> (`SuperAdmin=800, Admin=700, Manager=300, User=200, Viewer=100`), and is scoped to a set of assigned
+> Locations. This file is kept as a **historical record** of the superseded login/2FA/connection contract and
+> is **not** updated in place — see **`docs/api/tenancy-and-access-model.md`** for the current contract and
+> `docs/api/activation-key-authentication.md` for the (still-current) activation flow.
+
 Owner: `dotnet-backend-engineer`. This is the authoritative contract the Flutter mobile client
 implements against. Do not invent alternative shapes — if something is missing or wrong, raise it
 with the Team Lead and this doc is updated first.

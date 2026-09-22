@@ -14,8 +14,7 @@ public record CompanyDto(
     string Name,
     bool IsActive,
     DateTime CreatedAtUtc,
-    DateTime? UpdatedAtUtc,
-    Guid TenantId);
+    DateTime? UpdatedAtUtc);
 
 public record ListCompaniesQuery(string? Cursor, int? PageSize);
 
@@ -30,7 +29,11 @@ public class ListCompaniesQueryValidator : AbstractValidator<ListCompaniesQuery>
 }
 
 // ── Handler ─────────────────────────────────────────────────────────────────
-public class ListCompaniesHandler(IamsDbContext db, AccessCheckService accessCheck)
+/// <summary>
+/// Lists Companies the caller can see: their own single Company for every scoped role; for SuperAdmin (system
+/// wide) every Company. Company is the top-level unit now, so this is not location-scoped.
+/// </summary>
+public class ListCompaniesHandler(IamsDbContext db, AccessScopeResolver scopeResolver)
 {
     public async Task<Results<Ok<MasterDataPage<CompanyDto>>, ProblemHttpResult>> HandleAsync(
         ListCompaniesQuery query, CancellationToken ct)
@@ -40,11 +43,16 @@ public class ListCompaniesHandler(IamsDbContext db, AccessCheckService accessChe
             return ApiError.Problem(StatusCodes.Status400BadRequest, ErrorCodes.ValidationFailed, "Malformed cursor.");
         }
 
-        var reachable = (await accessCheck.GetReachableCompanyIdsAsync(ct)).ToArray();
+        var scope = await scopeResolver.ResolveAsync(ct);
         var take = query.PageSize ?? MasterDataPaging.DefaultPageSize;
 
-        var rows = await db.Companies.AsNoTracking()
-            .Where(c => reachable.Contains(c.Id))
+        var q = db.Companies.AsNoTracking();
+        if (!scope.SystemWide)
+        {
+            q = q.Where(c => c.Id == scope.CompanyId);
+        }
+
+        var rows = await q
             .Where(c => EF.Property<DateTime>(c, SyncCursor.ColumnName) > ts
                      || (EF.Property<DateTime>(c, SyncCursor.ColumnName) == ts && c.Id.CompareTo(id) > 0))
             .OrderBy(c => EF.Property<DateTime>(c, SyncCursor.ColumnName)).ThenBy(c => c.Id)
@@ -52,7 +60,7 @@ public class ListCompaniesHandler(IamsDbContext db, AccessCheckService accessChe
             .Select(c => new
             {
                 Cursor = EF.Property<DateTime>(c, SyncCursor.ColumnName),
-                Dto = new CompanyDto(c.Id, c.Name, c.IsActive, c.CreatedAtUtc, c.UpdatedAtUtc, c.TenantId)
+                Dto = new CompanyDto(c.Id, c.Name, c.IsActive, c.CreatedAtUtc, c.UpdatedAtUtc)
             })
             .ToListAsync(ct);
 

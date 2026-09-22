@@ -49,20 +49,20 @@ public class ResolveScanValidator : AbstractValidator<ResolveScanCommand>
 
 // ── Handler ─────────────────────────────────────────────────────────────────
 /// <summary>
-/// Resolves a raw scanned code to an inventory item (by SKU or barcode) or a physical location (a
-/// <see cref="Bin"/> matched by its label) within the caller's reachable company set, and records a
-/// <see cref="ScanEvent"/> for every attempt.
+/// Resolves a raw scanned code to an inventory item (by SKU or barcode, within the caller's Company) or a
+/// physical location (a <see cref="Bin"/> matched by its label, within the caller's assigned Locations), and
+/// records a <see cref="ScanEvent"/> for every attempt.
 ///
-/// Tenant isolation (BR-003) is a first-class outcome: a code that matches a real entity OUTSIDE the reachable
-/// set resolves to <see cref="ScanResolvedType.Blocked"/> with a NULL entity id — the other tenant's id is
+/// Scope isolation (BR-003) is a first-class outcome: a code that matches a real entity OUTSIDE the caller's
+/// scope resolves to <see cref="ScanResolvedType.Blocked"/> with a NULL entity id — the out-of-scope id is
 /// never returned or persisted, so neither the response nor the audit log can leak it. That is kept distinct
-/// from <see cref="ScanResolvedType.NoMatch"/> (matched nothing anywhere reachable-or-not).
+/// from <see cref="ScanResolvedType.NoMatch"/> (matched nothing anywhere at all).
 ///
 /// <see cref="ScanResolvedType.Asset"/> is reserved for F5: there is no Fixed Assets table to match against
 /// yet, so the current resolver never emits it — the value exists in the contract so clients can handle it
 /// without a breaking change when F5 lands. (Flagged to the Lead as a deliberate scope decision.)
 /// </summary>
-public class ResolveScanHandler(IamsDbContext db, AccessCheckService accessCheck, ICurrentUser currentUser, IClock clock)
+public class ResolveScanHandler(IamsDbContext db, AccessScopeResolver scopeResolver, ICurrentUser currentUser, IClock clock)
 {
     public async Task<Results<Ok<ResolveScanResponse>, ProblemHttpResult>> HandleAsync(
         ResolveScanCommand command, CancellationToken ct)
@@ -79,14 +79,13 @@ public class ResolveScanHandler(IamsDbContext db, AccessCheckService accessCheck
         }
 
         var code = command.RawCode.Trim();
-        var reachable = (await accessCheck.GetReachableCompanyIdsAsync(ct)).ToArray();
+        var scope = await scopeResolver.ResolveAsync(ct);
 
-        var (resolvedType, resolvedEntityId, label) = await ResolveAsync(code, reachable, ct);
+        var (resolvedType, resolvedEntityId, label) = await ResolveAsync(code, scope, ct);
 
         var scanEvent = new ScanEvent
         {
             Id = Guid.NewGuid(),
-            TenantId = currentUser.TenantId,
             CompanyId = currentUser.CompanyId,
             ScannedByUserId = currentUser.UserId,
             RawCode = code,
@@ -118,29 +117,40 @@ public class ResolveScanHandler(IamsDbContext db, AccessCheckService accessCheck
     }
 
     private async Task<(ScanResolvedType Type, Guid? EntityId, string? Label)> ResolveAsync(
-        string code, Guid[] reachable, CancellationToken ct)
+        string code, UserAccessScope scope, CancellationToken ct)
     {
-        // 1) SKU / barcode within the reachable set.
-        var item = await db.InventoryItems.AsNoTracking()
-            .Where(i => reachable.Contains(i.CompanyId) && i.IsActive && (i.Sku == code || i.Barcode == code))
-            .Select(i => new { i.Id, i.Name })
-            .FirstOrDefaultAsync(ct);
+        var locationIds = scope.LocationIds;
+
+        // 1) SKU / barcode within the caller's Company (SKUs are Company-level master data).
+        var itemsQ = db.InventoryItems.AsNoTracking()
+            .Where(i => i.IsActive && (i.Sku == code || i.Barcode == code));
+        if (!scope.SystemWide)
+        {
+            itemsQ = itemsQ.Where(i => i.CompanyId == scope.CompanyId);
+        }
+        var item = await itemsQ.Select(i => new { i.Id, i.Name }).FirstOrDefaultAsync(ct);
         if (item is not null)
         {
             return (ScanResolvedType.Sku, item.Id, item.Name);
         }
 
-        // 2) Physical location: a Bin matched by its label within the reachable set.
-        var bin = await db.Bins.AsNoTracking()
-            .Where(b => reachable.Contains(b.CompanyId) && b.IsActive && b.Name == code)
-            .Select(b => new { b.Id, b.Name })
-            .FirstOrDefaultAsync(ct);
+        // 2) Physical location: a Bin matched by its label within the caller's assigned Locations.
+        var binsQ = db.Bins.AsNoTracking().Where(b => b.IsActive && b.Name == code);
+        if (!scope.SystemWide)
+        {
+            binsQ = binsQ.Where(b => b.CompanyId == scope.CompanyId);
+        }
+        if (scope.LocationRestricted)
+        {
+            binsQ = binsQ.Where(b => locationIds.Contains(b.LocationId));
+        }
+        var bin = await binsQ.Select(b => new { b.Id, b.Name }).FirstOrDefaultAsync(ct);
         if (bin is not null)
         {
             return (ScanResolvedType.Location, bin.Id, bin.Name);
         }
 
-        // 3) BR-003: matched a real entity OUTSIDE the reachable set → Blocked, and never surface its id.
+        // 3) BR-003: matched a real entity OUTSIDE the caller's scope → Blocked, and never surface its id.
         var existsElsewhere =
             await db.InventoryItems.AsNoTracking().AnyAsync(i => i.Sku == code || i.Barcode == code, ct) ||
             await db.Bins.AsNoTracking().AnyAsync(b => b.Name == code, ct);

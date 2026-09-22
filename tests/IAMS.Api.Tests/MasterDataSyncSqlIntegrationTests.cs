@@ -33,7 +33,7 @@ public class MasterDataSyncSqlIntegrationTests
 
     private static readonly DateTime T0 = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-    private sealed record Seed(Guid CompanyId, Guid TenantId, IReadOnlyList<Guid> LocationIds);
+    private sealed record Seed(Guid CompanyId, IReadOnlyList<Guid> LocationIds);
 
     /// <summary>
     /// Seeds one company with locations spanning: CreatedAtUtc-only rows, an UpdatedAtUtc-overriding row,
@@ -46,14 +46,12 @@ public class MasterDataSyncSqlIntegrationTests
         await db.Database.EnsureDeletedAsync();
         await db.Database.EnsureCreatedAsync();
 
-        var tenant = new Tenant { Id = Guid.NewGuid(), Name = "T", Kind = TenantKind.Parent };
-        var company = new Company { Id = Guid.NewGuid(), TenantId = tenant.Id, Name = "Co", CreatedAtUtc = T0 };
+        var company = new Company { Id = Guid.NewGuid(), Name = "Co", CreatedAtUtc = T0 };
 
         Location Loc(string name, DateTime created, DateTime? updated) => new()
         {
             Id = Guid.NewGuid(),
             CompanyId = company.Id,
-            TenantId = tenant.Id,
             Name = name,
             CreatedAtUtc = created,
             UpdatedAtUtc = updated
@@ -65,18 +63,18 @@ public class MasterDataSyncSqlIntegrationTests
         var tieA = Loc("tieA", T0.AddDays(3), null);             // cursor = T0+3  ┐ tie
         var tieB = Loc("tieB", T0.AddDays(3), null);             // cursor = T0+3  ┘ tie, distinct Id
 
-        db.AddRange(tenant, company, l1, l2, l3, tieA, tieB);
+        db.AddRange(company, l1, l2, l3, tieA, tieB);
         await db.SaveChangesAsync();
 
-        return new Seed(company.Id, tenant.Id, new[] { l1.Id, l2.Id, l3.Id, tieA.Id, tieB.Id });
+        return new Seed(company.Id, new[] { l1.Id, l2.Id, l3.Id, tieA.Id, tieB.Id });
     }
 
     private static ListLocationsHandler HandlerFor(IamsDbContext db, Seed seed) =>
-        new(db, new AccessCheckService(db, new FakeCurrentUser
+        new(db, new AccessScopeResolver(db, new FakeCurrentUser
         {
             UserId = Guid.NewGuid(),
-            TenantId = seed.TenantId,
-            CompanyId = seed.CompanyId
+            CompanyId = seed.CompanyId,
+            Role = UserRole.Admin
         }));
 
     [Fact]

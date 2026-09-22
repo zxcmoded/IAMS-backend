@@ -20,6 +20,8 @@ public class LogoutTests
         {
             Id = Guid.NewGuid(),
             Username = "alice",
+            CompanyId = Guid.NewGuid(),
+            Role = UserRole.User,
             ActivationKeyHash = "h",
             ActivationStatus = ActivationStatus.Activated,
             SecurityStamp = Guid.NewGuid().ToString("N"),
@@ -29,7 +31,6 @@ public class LogoutTests
         {
             Id = Guid.NewGuid(),
             UserId = user.Id,
-            ActiveCompanyId = Guid.NewGuid(),
             SecurityStamp = user.SecurityStamp,
             CreatedAtUtc = DateTime.UtcNow,
             ExpiresAtUtc = DateTime.UtcNow.AddYears(100),

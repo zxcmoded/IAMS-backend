@@ -13,7 +13,6 @@ public static class ErrorCodes
     public const string ValidationFailed = "validation_failed";
     public const string SessionExpired = "session_expired";
     public const string AccessDenied = "access_denied";
-    public const string NoActiveCompany = "no_active_company";
     public const string NotFound = "not_found";
 
     /// <summary>

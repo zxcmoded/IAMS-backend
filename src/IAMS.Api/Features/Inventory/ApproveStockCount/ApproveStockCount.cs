@@ -18,15 +18,14 @@ namespace IAMS.Api.Features.Inventory.ApproveStockCount;
 /// computed against the CURRENT on-hand at approval time (stock may have moved since the count), so the final
 /// on-hand always equals the counted quantity. Approving a count that is not pending returns a 409.
 /// </summary>
-public class ApproveStockCountHandler(IamsDbContext db, AccessCheckService accessCheck, ICurrentUser currentUser, IClock clock)
+public class ApproveStockCountHandler(IamsDbContext db, AccessScopeResolver scopeResolver, ICurrentUser currentUser, IClock clock)
 {
     public async Task<Results<Ok<StockCountResponse>, ProblemHttpResult>> HandleAsync(Guid id, CancellationToken ct)
     {
-        var reachable = (await accessCheck.GetReachableCompanyIdsAsync(ct)).ToArray();
+        var scope = await scopeResolver.ResolveAsync(ct);
 
-        var count = await db.StockCounts
-            .FirstOrDefaultAsync(c => c.Id == id && reachable.Contains(c.CompanyId), ct);
-        if (count is null)
+        var count = await db.StockCounts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (count is null || !scope.LocationInScope(count.CompanyId, count.LocationId))
         {
             return ApiError.Problem(StatusCodes.Status404NotFound, ErrorCodes.NotFound, "Stock count not found.");
         }
@@ -55,7 +54,6 @@ public class ApproveStockCountHandler(IamsDbContext db, AccessCheckService acces
             var adjustment = new InventoryTransaction
             {
                 Id = Guid.NewGuid(),
-                TenantId = count.TenantId,
                 CompanyId = count.CompanyId,
                 InventoryItemId = count.InventoryItemId,
                 TransactionType = InventoryTransactionType.Adjustment,

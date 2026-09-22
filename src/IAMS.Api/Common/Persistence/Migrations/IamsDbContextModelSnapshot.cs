@@ -55,9 +55,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamptz");
 
@@ -69,8 +66,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.HasIndex("CompanyId");
 
                     b.HasIndex("RackId");
-
-                    b.HasIndex("TenantId");
 
                     b.HasIndex("WarehouseId");
 
@@ -104,169 +99,15 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamptz");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("TenantId");
 
                     b.HasIndex("SyncCursorUtc", "Id")
                         .HasDatabaseName("IX_Companies_Sync");
 
                     b.ToTable("Companies", (string)null);
-                });
-
-            modelBuilder.Entity("IAMS.Api.Common.Domain.CompanyConnection", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("ConnectionType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<DateTime>("EffectiveFromUtc")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamptz")
-                        .HasDefaultValueSql("now()");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("PermissionLevel")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<long>("PolicyRevision")
-                        .HasColumnType("bigint");
-
-                    b.Property<Guid>("SourceCompanyId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("TargetCompanyId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("UpdatedAtUtc")
-                        .HasColumnType("timestamptz");
-
-                    b.Property<uint>("xmin")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TargetCompanyId");
-
-                    b.HasIndex("SourceCompanyId", "TargetCompanyId")
-                        .IsUnique();
-
-                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("SourceCompanyId", "TargetCompanyId"), new[] { "IsEnabled", "PermissionLevel", "ConnectionType", "PolicyRevision" });
-
-                    b.ToTable("CompanyConnections", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_CompanyConnections_ConnectionType", "\"ConnectionType\" IN ('ParentToParent', 'ParentToChild', 'ChildToParent', 'ChildToChild')");
-
-                            t.HasCheckConstraint("CK_CompanyConnections_NoSelf", "\"SourceCompanyId\" <> \"TargetCompanyId\"");
-
-                            t.HasCheckConstraint("CK_CompanyConnections_PermissionLevel", "\"PermissionLevel\" IN ('Read', 'Write', 'Full')");
-                        });
-                });
-
-            modelBuilder.Entity("IAMS.Api.Common.Domain.CompanyConnectionFilter", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CompanyConnectionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("FilterType")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("FilterValue")
-                        .IsRequired()
-                        .HasMaxLength(400)
-                        .HasColumnType("character varying(400)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompanyConnectionId");
-
-                    b.ToTable("CompanyConnectionFilters", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_CompanyConnectionFilters_FilterType", "\"FilterType\" IN ('Region', 'Location', 'Warehouse', 'Category')");
-                        });
-                });
-
-            modelBuilder.Entity("IAMS.Api.Common.Domain.CompanyConnectionScope", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("CompanyConnectionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Level")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("PermissionLevelOverride")
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<Guid?>("ScopeBinId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("ScopeCompanyId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("ScopeLocationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("ScopeRackId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("ScopeWarehouseId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CompanyConnectionId");
-
-                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("CompanyConnectionId"), new[] { "Level", "ScopeCompanyId", "ScopeLocationId", "ScopeWarehouseId", "ScopeRackId", "ScopeBinId", "PermissionLevelOverride" });
-
-                    b.HasIndex("ScopeBinId");
-
-                    b.HasIndex("ScopeCompanyId");
-
-                    b.HasIndex("ScopeLocationId");
-
-                    b.HasIndex("ScopeRackId");
-
-                    b.HasIndex("ScopeWarehouseId");
-
-                    b.ToTable("CompanyConnectionScopes", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_CompanyConnectionScopes_Level", "\"Level\" IN ('Company', 'Location', 'Warehouse', 'Rack', 'Bin')");
-
-                            t.HasCheckConstraint("CK_ConnScope_LevelMatches", "(\"Level\" = 'Company'   AND \"ScopeCompanyId\"   IS NOT NULL) OR(\"Level\" = 'Location'  AND \"ScopeLocationId\"  IS NOT NULL) OR(\"Level\" = 'Warehouse' AND \"ScopeWarehouseId\" IS NOT NULL) OR(\"Level\" = 'Rack'      AND \"ScopeRackId\"      IS NOT NULL) OR(\"Level\" = 'Bin'       AND \"ScopeBinId\"       IS NOT NULL)");
-
-                            t.HasCheckConstraint("CK_ConnScope_OneTarget", "(CASE WHEN \"ScopeCompanyId\"   IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"ScopeLocationId\"  IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"ScopeWarehouseId\" IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"ScopeRackId\"      IS NOT NULL THEN 1 ELSE 0 END + CASE WHEN \"ScopeBinId\"       IS NOT NULL THEN 1 ELSE 0 END) = 1");
-                        });
                 });
 
             modelBuilder.Entity("IAMS.Api.Common.Domain.InventoryItem", b =>
@@ -313,9 +154,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("UnitOfMeasure")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
@@ -330,8 +168,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasColumnName("xmin");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("TenantId");
 
                     b.HasIndex("CompanyId", "Barcode")
                         .HasFilter("\"Barcode\" IS NOT NULL");
@@ -358,9 +194,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamptz")
                         .HasDefaultValueSql("now()");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamptz");
@@ -460,9 +293,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
                     b.Property<string>("TransactionType")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -487,8 +317,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
 
                     b.HasIndex("SourceBinId")
                         .HasFilter("\"SourceBinId\" IS NOT NULL");
-
-                    b.HasIndex("TenantId");
 
                     b.HasIndex("CompanyId", "CreatedAtUtc");
 
@@ -538,17 +366,12 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamptz");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CompanyId");
-
-                    b.HasIndex("TenantId");
 
                     b.HasIndex("CompanyId", "Region");
 
@@ -588,9 +411,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamptz");
 
@@ -601,37 +421,12 @@ namespace IAMS.Api.Common.Persistence.Migrations
 
                     b.HasIndex("CompanyId");
 
-                    b.HasIndex("TenantId");
-
                     b.HasIndex("WarehouseId");
 
                     b.HasIndex("CompanyId", "SyncCursorUtc", "Id")
                         .HasDatabaseName("IX_Racks_Sync");
 
                     b.ToTable("Racks", (string)null);
-                });
-
-            modelBuilder.Entity("IAMS.Api.Common.Domain.Role", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(400)
-                        .HasColumnType("character varying(400)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Name")
-                        .IsUnique();
-
-                    b.ToTable("Roles", (string)null);
                 });
 
             modelBuilder.Entity("IAMS.Api.Common.Domain.ScanEvent", b =>
@@ -675,16 +470,11 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.Property<Guid>("ScannedByUserId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
 
                     b.HasIndex("IdempotencyKey")
                         .IsUnique()
                         .HasFilter("\"IdempotencyKey\" IS NOT NULL");
-
-                    b.HasIndex("TenantId");
 
                     b.HasIndex("CompanyId", "RawCode");
 
@@ -773,9 +563,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasPrecision(18, 4)
                         .HasColumnType("numeric(18,4)");
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamptz");
 
@@ -817,8 +604,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .IsUnique();
 
                     b.HasIndex("InventoryItemId");
-
-                    b.HasIndex("TenantId");
 
                     b.HasIndex("CompanyId", "Status")
                         .HasFilter("\"Status\" = 'PendingApproval'");
@@ -871,9 +656,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamptz");
 
@@ -893,8 +675,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
 
                     b.HasIndex("BinId");
 
-                    b.HasIndex("TenantId");
-
                     b.HasIndex("CompanyId", "InventoryItemId");
 
                     b.HasIndex("InventoryItemId", "BinId")
@@ -906,40 +686,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.ToTable("StockLevels", null, t =>
                         {
                             t.HasCheckConstraint("CK_StockLevels_NonNegative", "\"QuantityOnHand\" >= 0");
-                        });
-                });
-
-            modelBuilder.Entity("IAMS.Api.Common.Domain.Tenant", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("timestamptz")
-                        .HasDefaultValueSql("now()");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Kind");
-
-                    b.ToTable("Tenants", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_Tenants_Kind", "\"Kind\" IN ('Parent', 'Child')");
                         });
                 });
 
@@ -972,6 +718,9 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamptz")
@@ -984,10 +733,8 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
-                    b.Property<bool>("IsSystemAdmin")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false);
+                    b.Property<int>("Role")
+                        .HasColumnType("integer");
 
                     b.Property<string>("SecurityStamp")
                         .IsRequired()
@@ -1012,25 +759,28 @@ namespace IAMS.Api.Common.Persistence.Migrations
 
                     b.HasIndex("ActivationResetByUserId");
 
+                    b.HasIndex("CompanyId");
+
                     b.ToTable("Users", null, t =>
                         {
                             t.HasCheckConstraint("CK_Users_ActivationStatus", "\"ActivationStatus\" IN ('NotActivated', 'Activated')");
+
+                            t.HasCheckConstraint("CK_Users_Role", "\"Role\" IN (100, 200, 300, 700, 800)");
                         });
                 });
 
-            modelBuilder.Entity("IAMS.Api.Common.Domain.UserCompanyMembership", b =>
+            modelBuilder.Entity("IAMS.Api.Common.Domain.UserLocationAssignment", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("CompanyId")
-                        .HasColumnType("uuid");
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamptz")
+                        .HasDefaultValueSql("now()");
 
-                    b.Property<bool>("IsPrimary")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("RoleId")
+                    b.Property<Guid>("LocationId")
                         .HasColumnType("uuid");
 
                     b.Property<Guid>("UserId")
@@ -1038,26 +788,18 @@ namespace IAMS.Api.Common.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("CompanyId");
+                    b.HasIndex("LocationId");
 
-                    b.HasIndex("RoleId");
-
-                    b.HasIndex("UserId", "CompanyId")
+                    b.HasIndex("UserId", "LocationId")
                         .IsUnique();
 
-                    b.ToTable("UserCompanyMemberships", (string)null);
+                    b.ToTable("UserLocationAssignments", (string)null);
                 });
 
             modelBuilder.Entity("IAMS.Api.Common.Domain.UserSession", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("ActiveCompanyId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("ActiveLocationId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAtUtc")
@@ -1087,10 +829,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ActiveCompanyId");
-
-                    b.HasIndex("ActiveLocationId");
 
                     b.HasIndex("UserId")
                         .HasFilter("\"RevokedAtUtc\" IS NULL");
@@ -1128,9 +866,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasColumnType("timestamptz")
                         .HasComputedColumnSql("COALESCE(\"UpdatedAtUtc\", \"CreatedAtUtc\")", true);
 
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime?>("UpdatedAtUtc")
                         .HasColumnType("timestamptz");
 
@@ -1139,8 +874,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.HasIndex("CompanyId");
 
                     b.HasIndex("LocationId");
-
-                    b.HasIndex("TenantId");
 
                     b.HasIndex("CompanyId", "SyncCursorUtc", "Id")
                         .HasDatabaseName("IX_Warehouses_Sync");
@@ -1157,83 +890,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Rack");
-                });
-
-            modelBuilder.Entity("IAMS.Api.Common.Domain.Company", b =>
-                {
-                    b.HasOne("IAMS.Api.Common.Domain.Tenant", "Tenant")
-                        .WithMany("Companies")
-                        .HasForeignKey("TenantId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Tenant");
-                });
-
-            modelBuilder.Entity("IAMS.Api.Common.Domain.CompanyConnection", b =>
-                {
-                    b.HasOne("IAMS.Api.Common.Domain.Company", "SourceCompany")
-                        .WithMany()
-                        .HasForeignKey("SourceCompanyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("IAMS.Api.Common.Domain.Company", "TargetCompany")
-                        .WithMany()
-                        .HasForeignKey("TargetCompanyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("SourceCompany");
-
-                    b.Navigation("TargetCompany");
-                });
-
-            modelBuilder.Entity("IAMS.Api.Common.Domain.CompanyConnectionFilter", b =>
-                {
-                    b.HasOne("IAMS.Api.Common.Domain.CompanyConnection", "Connection")
-                        .WithMany("Filters")
-                        .HasForeignKey("CompanyConnectionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Connection");
-                });
-
-            modelBuilder.Entity("IAMS.Api.Common.Domain.CompanyConnectionScope", b =>
-                {
-                    b.HasOne("IAMS.Api.Common.Domain.CompanyConnection", "Connection")
-                        .WithMany("Scopes")
-                        .HasForeignKey("CompanyConnectionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("IAMS.Api.Common.Domain.Bin", null)
-                        .WithMany()
-                        .HasForeignKey("ScopeBinId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("IAMS.Api.Common.Domain.Company", null)
-                        .WithMany()
-                        .HasForeignKey("ScopeCompanyId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("IAMS.Api.Common.Domain.Location", null)
-                        .WithMany()
-                        .HasForeignKey("ScopeLocationId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("IAMS.Api.Common.Domain.Rack", null)
-                        .WithMany()
-                        .HasForeignKey("ScopeRackId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.HasOne("IAMS.Api.Common.Domain.Warehouse", null)
-                        .WithMany()
-                        .HasForeignKey("ScopeWarehouseId")
-                        .OnDelete(DeleteBehavior.NoAction);
-
-                    b.Navigation("Connection");
                 });
 
             modelBuilder.Entity("IAMS.Api.Common.Domain.InventoryItem", b =>
@@ -1398,57 +1054,43 @@ namespace IAMS.Api.Common.Persistence.Migrations
                         .HasForeignKey("ActivationResetByUserId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.Navigation("ActivationResetByUser");
-                });
-
-            modelBuilder.Entity("IAMS.Api.Common.Domain.UserCompanyMembership", b =>
-                {
                     b.HasOne("IAMS.Api.Common.Domain.Company", "Company")
                         .WithMany()
                         .HasForeignKey("CompanyId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("IAMS.Api.Common.Domain.Role", "Role")
+                    b.Navigation("ActivationResetByUser");
+
+                    b.Navigation("Company");
+                });
+
+            modelBuilder.Entity("IAMS.Api.Common.Domain.UserLocationAssignment", b =>
+                {
+                    b.HasOne("IAMS.Api.Common.Domain.Location", "Location")
                         .WithMany()
-                        .HasForeignKey("RoleId")
-                        .OnDelete(DeleteBehavior.Restrict);
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("IAMS.Api.Common.Domain.User", "User")
-                        .WithMany("Memberships")
+                        .WithMany("AssignedLocations")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("Company");
-
-                    b.Navigation("Role");
+                    b.Navigation("Location");
 
                     b.Navigation("User");
                 });
 
             modelBuilder.Entity("IAMS.Api.Common.Domain.UserSession", b =>
                 {
-                    b.HasOne("IAMS.Api.Common.Domain.Company", "ActiveCompany")
-                        .WithMany()
-                        .HasForeignKey("ActiveCompanyId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("IAMS.Api.Common.Domain.Location", "ActiveLocation")
-                        .WithMany()
-                        .HasForeignKey("ActiveLocationId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("IAMS.Api.Common.Domain.User", "User")
                         .WithMany("Sessions")
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("ActiveCompany");
-
-                    b.Navigation("ActiveLocation");
 
                     b.Navigation("User");
                 });
@@ -1469,13 +1111,6 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.Navigation("Locations");
                 });
 
-            modelBuilder.Entity("IAMS.Api.Common.Domain.CompanyConnection", b =>
-                {
-                    b.Navigation("Filters");
-
-                    b.Navigation("Scopes");
-                });
-
             modelBuilder.Entity("IAMS.Api.Common.Domain.InventoryItem", b =>
                 {
                     b.Navigation("StockLevels");
@@ -1491,14 +1126,9 @@ namespace IAMS.Api.Common.Persistence.Migrations
                     b.Navigation("Bins");
                 });
 
-            modelBuilder.Entity("IAMS.Api.Common.Domain.Tenant", b =>
-                {
-                    b.Navigation("Companies");
-                });
-
             modelBuilder.Entity("IAMS.Api.Common.Domain.User", b =>
                 {
-                    b.Navigation("Memberships");
+                    b.Navigation("AssignedLocations");
 
                     b.Navigation("Sessions");
                 });

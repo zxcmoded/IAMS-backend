@@ -1,25 +1,38 @@
 namespace IAMS.Api.Common.Domain;
 
-/// <summary>Whether a tenant (and its companies) sits on the parent or child side of the hierarchy (F15).</summary>
-public enum TenantKind
+/// <summary>
+/// The fixed, closed set of application roles. Modeled as a plain C# enum with explicit <b>int codes</b>
+/// (not a lookup table) — the codes are deliberately ordered and gapped so a higher value always denotes a
+/// superset of privileges, letting access checks compare with <c>&gt;=</c> (e.g. "Manager or above" is
+/// <c>role &gt;= UserRole.Manager</c>). Each user holds exactly one role (see <see cref="User.Role"/>).
+///
+/// The int codes are the authoritative wire value (persisted as an int column, carried as the JWT
+/// <c>role</c> claim, and echoed in API responses as <c>{ code, name }</c>) so a client can reason about
+/// privilege ordering numerically without hardcoding name strings.
+/// </summary>
+public enum UserRole
 {
-    Parent = 1,
-    Child = 2
+    /// <summary>Read-only within assigned Locations.</summary>
+    Viewer = 100,
+
+    /// <summary>"Scanner" — performs inventory/scanning operations within assigned Locations.</summary>
+    User = 200,
+
+    /// <summary>Manages assigned Locations and their inventory.</summary>
+    Manager = 300,
+
+    /// <summary>Manages company-level data and users; scoped to their own Company (all its Locations).</summary>
+    Admin = 700,
+
+    /// <summary>Full system access — not restricted by Company/Location scoping.</summary>
+    SuperAdmin = 800
 }
 
 /// <summary>
-/// Direction of a company-to-company connection. Stored explicitly (not derived) because direction is
-/// evaluated independently per BR-TC-002 (P→C does not imply C→P).
+/// The hierarchy level a scope/resource resolves to. Retained from the original model (the physical
+/// hierarchy — Company → Location → Warehouse → Rack → Bin — is unchanged apart from dropping the former
+/// Tenant level on top) so scope-level checks have a single named vocabulary.
 /// </summary>
-public enum ConnectionType
-{
-    ParentToParent = 1,
-    ParentToChild = 2,
-    ChildToParent = 3,
-    ChildToChild = 4
-}
-
-/// <summary>The hierarchy level at which a connection scope grants access (BR-TC-003).</summary>
 public enum HierarchyLevel
 {
     Company = 1,
@@ -27,27 +40,6 @@ public enum HierarchyLevel
     Warehouse = 3,
     Rack = 4,
     Bin = 5
-}
-
-/// <summary>
-/// Permission granted by a connection / scope (BR-TC-004). Ordered so a higher value satisfies every
-/// requirement a lower one does (Read &lt; Write &lt; Full). "No permission" is represented out-of-band
-/// (a nullable in access decisions), never stored, so the DB CHECK domain stays exactly these three.
-/// </summary>
-public enum PermissionLevel
-{
-    Read = 1,
-    Write = 2,
-    Full = 3
-}
-
-/// <summary>Extensible connection filter dimensions (region / warehouse / category / location).</summary>
-public enum ConnectionFilterType
-{
-    Region = 1,
-    Location = 2,
-    Warehouse = 3,
-    Category = 4
 }
 
 /// <summary>

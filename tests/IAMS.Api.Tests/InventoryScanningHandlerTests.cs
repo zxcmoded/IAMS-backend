@@ -34,23 +34,21 @@ public class InventoryScanningHandlerTests
         public required IamsDbContext Db { get; init; }
         public required FakeCurrentUser User { get; init; }
         public required Guid CompanyId { get; init; }
-        public required Guid TenantId { get; init; }
         public required Guid BinAId { get; init; }
         public required Guid BinBId { get; init; }
         public required Guid ItemId { get; init; }
 
-        public AccessCheckService Access => new(Db, User);
+        public AccessScopeResolver Access => new(Db, User);
         public StockMovementService Movements => new(Db, Access, User);
     }
 
     private static Fixture NewFixture(string sku = "SKU-1", string? barcode = "BC-1", string binAName = "BIN-A")
     {
         var db = TestDb.New();
-        var tenantId = Guid.NewGuid();
         var companyId = Guid.NewGuid();
         var userId = Guid.NewGuid();
 
-        db.Companies.Add(new Company { Id = companyId, TenantId = tenantId, Name = "Co", CreatedAtUtc = T0 });
+        db.Companies.Add(new Company { Id = companyId, Name = "Co", CreatedAtUtc = T0 });
 
         Bin MakeBin(string name) => new()
         {
@@ -60,7 +58,6 @@ public class InventoryScanningHandlerTests
             WarehouseId = Guid.NewGuid(),
             LocationId = Guid.NewGuid(),
             CompanyId = companyId,
-            TenantId = tenantId,
             IsActive = true,
             CreatedAtUtc = T0
         };
@@ -71,7 +68,6 @@ public class InventoryScanningHandlerTests
         var item = new InventoryItem
         {
             Id = Guid.NewGuid(),
-            TenantId = tenantId,
             CompanyId = companyId,
             Sku = sku,
             Barcode = barcode,
@@ -85,9 +81,8 @@ public class InventoryScanningHandlerTests
         return new Fixture
         {
             Db = db,
-            User = new FakeCurrentUser { UserId = userId, TenantId = tenantId, CompanyId = companyId },
+            User = new FakeCurrentUser { UserId = userId, CompanyId = companyId, Role = UserRole.Admin },
             CompanyId = companyId,
-            TenantId = tenantId,
             BinAId = binA.Id,
             BinBId = binB.Id,
             ItemId = item.Id
@@ -154,7 +149,6 @@ public class InventoryScanningHandlerTests
         f.Db.InventoryItems.Add(new InventoryItem
         {
             Id = Guid.NewGuid(),
-            TenantId = Guid.NewGuid(),
             CompanyId = otherCompany,
             Sku = "OTHER-SKU",
             Name = "Secret",
@@ -308,7 +302,7 @@ public class InventoryScanningHandlerTests
         // Company settings: absolute threshold of 5 ⇒ a variance of 2 is within.
         f.Db.InventorySettings.Add(new InventorySettings
         {
-            Id = Guid.NewGuid(), TenantId = f.TenantId, CompanyId = f.CompanyId,
+            Id = Guid.NewGuid(), CompanyId = f.CompanyId,
             VarianceThreshold = 5m, VarianceThresholdType = VarianceThresholdType.AbsoluteQuantity, CreatedAtUtc = T0
         });
         await f.Db.SaveChangesAsync();
@@ -329,7 +323,7 @@ public class InventoryScanningHandlerTests
         await Receive(f).HandleAsync(new ReceiveStockCommand("r", f.ItemId, f.BinAId, 10m, null, null, null), default);
         f.Db.InventorySettings.Add(new InventorySettings
         {
-            Id = Guid.NewGuid(), TenantId = f.TenantId, CompanyId = f.CompanyId,
+            Id = Guid.NewGuid(), CompanyId = f.CompanyId,
             VarianceThreshold = 1m, VarianceThresholdType = VarianceThresholdType.AbsoluteQuantity, CreatedAtUtc = T0
         });
         await f.Db.SaveChangesAsync();
@@ -393,7 +387,7 @@ public class InventoryScanningHandlerTests
         await Receive(f).HandleAsync(new ReceiveStockCommand("r", f.ItemId, f.BinAId, 10m, null, null, null), default);
         f.Db.InventorySettings.Add(new InventorySettings
         {
-            Id = Guid.NewGuid(), TenantId = f.TenantId, CompanyId = f.CompanyId,
+            Id = Guid.NewGuid(), CompanyId = f.CompanyId,
             VarianceThreshold = 100m, VarianceThresholdType = VarianceThresholdType.AbsoluteQuantity, CreatedAtUtc = T0
         });
         await f.Db.SaveChangesAsync();
@@ -416,7 +410,7 @@ public class InventoryScanningHandlerTests
         // A second item with no stock.
         f.Db.InventoryItems.Add(new InventoryItem
         {
-            Id = Guid.NewGuid(), TenantId = f.TenantId, CompanyId = f.CompanyId,
+            Id = Guid.NewGuid(), CompanyId = f.CompanyId,
             Sku = "SKU-2", Name = "Empty", IsActive = true, CreatedAtUtc = T0
         });
         await f.Db.SaveChangesAsync();

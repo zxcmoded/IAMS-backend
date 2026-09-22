@@ -129,7 +129,6 @@ public static class InventoryConcurrency
         WarehouseId = bin.WarehouseId,
         LocationId = bin.LocationId,
         CompanyId = bin.CompanyId,
-        TenantId = bin.TenantId,
         QuantityOnHand = 0m,
         Version = 0
     };

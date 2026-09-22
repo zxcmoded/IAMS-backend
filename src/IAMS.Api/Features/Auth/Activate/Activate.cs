@@ -1,5 +1,4 @@
 using FluentValidation;
-using IAMS.Api.Common.Auth;
 using IAMS.Api.Common.Domain;
 using IAMS.Api.Common.Errors;
 using IAMS.Api.Common.Persistence;
@@ -53,7 +52,6 @@ public class ActivateValidator : AbstractValidator<ActivateCommand>
 public class ActivateHandler(
     IamsDbContext db,
     SessionIssuer sessionIssuer,
-    ActiveScopeResolver scopeResolver,
     IClock clock)
 {
     /// <summary>
@@ -126,16 +124,9 @@ public class ActivateHandler(
             }
 
             // Success: either freshly activated just now, or re-authenticating from the already-bound
-            // device. Resolve the active scope and issue a session.
-            var scope = await scopeResolver.ResolvePrimaryAsync(user.Id, ct);
-            if (scope is null)
-            {
-                return ApiError.Problem(StatusCodes.Status403Forbidden,
-                    ErrorCodes.NoActiveCompany, "This user has no company membership to sign in to.");
-            }
-
-            var session = await sessionIssuer.IssueAsync(
-                user, scope.Value.TenantId, scope.Value.CompanyId, scope.Value.LocationId, command.DeviceId, ct);
+            // device. Every user has exactly one Company (non-nullable FK) and one role, so there is no
+            // "no active company" case to guard — issue the session directly.
+            var session = await sessionIssuer.IssueAsync(user, command.DeviceId, ct);
 
             return TypedResults.Ok(new AuthTokenResponse(
                 session.AccessToken,

@@ -1,9 +1,9 @@
 namespace IAMS.Api.Common.Domain;
 
 /// <summary>
-/// Base for every physical-hierarchy node. Each level denormalizes its full ancestor id chain so the
-/// effective-access scope check is a set of direct, indexable column comparisons rather than a recursive
-/// ancestry walk on the hot path. Ancestry columns are maintained on create/move.
+/// Base for every physical-hierarchy node below <see cref="Company"/>. Each level denormalizes its full
+/// ancestor id chain so scope checks are a set of direct, indexable column comparisons rather than a
+/// recursive ancestry walk on the hot path. Ancestry columns are maintained on create/move.
 /// </summary>
 public abstract class HierarchyNode
 {
@@ -12,22 +12,12 @@ public abstract class HierarchyNode
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAtUtc { get; set; }
     public DateTime? UpdatedAtUtc { get; set; }
-
-    /// <summary>Root tenant this node ultimately belongs to (denormalized on every level for isolation checks).</summary>
-    public Guid TenantId { get; set; }
 }
 
-public class Tenant
-{
-    public Guid Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public TenantKind Kind { get; set; }
-    public bool IsActive { get; set; } = true;
-    public DateTime CreatedAtUtc { get; set; }
-
-    public ICollection<Company> Companies { get; set; } = new List<Company>();
-}
-
+/// <summary>
+/// Top-level organizational unit. A <see cref="User"/> belongs to exactly one Company, and all data access
+/// is scoped to it (further narrowed to assigned Locations for the location-restricted roles).
+/// </summary>
 public class Company
 {
     public Guid Id { get; set; }
@@ -36,13 +26,10 @@ public class Company
     public DateTime CreatedAtUtc { get; set; }
 
     /// <summary>
-    /// Last modification timestamp. Added for symmetry with <see cref="HierarchyNode"/> so Company can
+    /// Last modification timestamp. Kept for symmetry with <see cref="HierarchyNode"/> so Company can
     /// participate in the same COALESCE(UpdatedAtUtc, CreatedAtUtc) sync-cursor scheme as the other levels.
     /// </summary>
     public DateTime? UpdatedAtUtc { get; set; }
-
-    public Guid TenantId { get; set; }
-    public Tenant Tenant { get; set; } = null!;
 
     public ICollection<Location> Locations { get; set; } = new List<Location>();
 }
@@ -52,7 +39,7 @@ public class Location : HierarchyNode
     public Guid CompanyId { get; set; }
     public Company Company { get; set; } = null!;
 
-    /// <summary>Optional region tag used by connection region-filtering.</summary>
+    /// <summary>Optional region tag.</summary>
     public string? Region { get; set; }
 
     public ICollection<Warehouse> Warehouses { get; set; } = new List<Warehouse>();

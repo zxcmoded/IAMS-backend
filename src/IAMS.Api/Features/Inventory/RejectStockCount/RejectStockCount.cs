@@ -26,16 +26,15 @@ public class RejectStockCountValidator : AbstractValidator<RejectStockCountComma
 /// Rejects a <see cref="StockCountStatus.PendingApproval"/> count: no stock change, just a terminal
 /// <see cref="StockCountStatus.Rejected"/> status with an optional reason. Rejecting a non-pending count → 409.
 /// </summary>
-public class RejectStockCountHandler(IamsDbContext db, AccessCheckService accessCheck, IClock clock)
+public class RejectStockCountHandler(IamsDbContext db, AccessScopeResolver scopeResolver, IClock clock)
 {
     public async Task<Results<Ok<StockCountResponse>, ProblemHttpResult>> HandleAsync(
         Guid id, RejectStockCountCommand command, CancellationToken ct)
     {
-        var reachable = (await accessCheck.GetReachableCompanyIdsAsync(ct)).ToArray();
+        var scope = await scopeResolver.ResolveAsync(ct);
 
-        var count = await db.StockCounts
-            .FirstOrDefaultAsync(c => c.Id == id && reachable.Contains(c.CompanyId), ct);
-        if (count is null)
+        var count = await db.StockCounts.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (count is null || !scope.LocationInScope(count.CompanyId, count.LocationId))
         {
             return ApiError.Problem(StatusCodes.Status404NotFound, ErrorCodes.NotFound, "Stock count not found.");
         }

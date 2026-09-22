@@ -37,7 +37,6 @@ public class InventoryItemConfiguration : IEntityTypeConfiguration<InventoryItem
         b.HasIndex(x => new { x.CompanyId, x.Sku }).IsUnique();
         b.HasIndex(x => new { x.CompanyId, x.Barcode })
             .HasFilter("\"Barcode\" IS NOT NULL");
-        b.HasIndex(x => x.TenantId);
 
         // Master-data sync (offline read): shadow cursor column + company-scoped keyset index.
         b.Property<DateTime>(SyncCursor.ColumnName);
@@ -64,7 +63,6 @@ public class StockLevelConfiguration : IEntityTypeConfiguration<StockLevel>
         b.HasIndex(x => new { x.InventoryItemId, x.BinId }).IsUnique();
         b.HasIndex(x => x.BinId);                            // "what's in this bin"
         b.HasIndex(x => new { x.CompanyId, x.InventoryItemId }); // "where is this item"
-        b.HasIndex(x => x.TenantId);
 
         b.Property<DateTime>(SyncCursor.ColumnName);
         b.HasIndex("CompanyId", SyncCursor.ColumnName, "Id").HasDatabaseName("IX_StockLevels_Sync");
@@ -115,7 +113,6 @@ public class InventoryTransactionConfiguration : IEntityTypeConfiguration<Invent
         b.HasIndex(x => x.InventoryItemId);                   // item movement history
         b.HasIndex(x => x.SourceBinId).HasFilter("\"SourceBinId\" IS NOT NULL");
         b.HasIndex(x => x.DestinationBinId).HasFilter("\"DestinationBinId\" IS NOT NULL");
-        b.HasIndex(x => x.TenantId);
 
         b.Property<DateTime>(SyncCursor.ColumnName);
         b.HasIndex("CompanyId", SyncCursor.ColumnName, "Id").HasDatabaseName("IX_InventoryTransactions_Sync");
@@ -159,7 +156,6 @@ public class StockCountConfiguration : IEntityTypeConfiguration<StockCount>
             .HasFilter("\"Status\" = 'PendingApproval'");
         b.HasIndex(x => x.BinId);
         b.HasIndex(x => x.InventoryItemId);
-        b.HasIndex(x => x.TenantId);
 
         b.Property<DateTime>(SyncCursor.ColumnName);
         b.HasIndex("CompanyId", SyncCursor.ColumnName, "Id").HasDatabaseName("IX_StockCounts_Sync");
@@ -206,6 +202,5 @@ public class ScanEventConfiguration : IEntityTypeConfiguration<ScanEvent>
         b.HasIndex(x => x.IdempotencyKey)
             .IsUnique()
             .HasFilter("\"IdempotencyKey\" IS NOT NULL");
-        b.HasIndex(x => x.TenantId);
     }
 }

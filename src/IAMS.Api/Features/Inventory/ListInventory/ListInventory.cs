@@ -1,6 +1,5 @@
 using FluentValidation;
 using IAMS.Api.Common.Access;
-using IAMS.Api.Common.Errors;
 using IAMS.Api.Common.Inventory;
 using IAMS.Api.Common.Persistence;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -63,12 +62,15 @@ public class ListInventoryQueryValidator : AbstractValidator<ListInventoryQuery>
 
 // ── Handler ─────────────────────────────────────────────────────────────────
 /// <summary>
-/// Online inventory listing for the F4 list screen: reachable-company scoped, substring-searchable, and
-/// filterable by aggregate on-hand (in-stock / low-stock / out-of-stock). Offset-paginated with a peek-ahead
-/// (pageSize+1) fetch so <c>hasMore</c> needs no separate COUNT. This is distinct from the offline sync feed
-/// (InventoryItems/StockLevels ride the shared SyncCursor mechanism) — it's the interactive query surface.
+/// Online inventory listing for the F4 list screen: Company-scoped SKU catalog, substring-searchable, and
+/// filterable by aggregate on-hand (in-stock / low-stock / out-of-stock). The aggregate on-hand is summed
+/// over stock rows narrowed to the caller's assigned Locations for the location-restricted roles, so a
+/// Viewer/Scanner sees each SKU with the on-hand that exists in their own Locations only (and the stock
+/// filters apply to that scoped total). Offset-paginated with a peek-ahead (pageSize+1) fetch so
+/// <c>hasMore</c> needs no separate COUNT. Distinct from the offline sync feed — this is the interactive
+/// query surface.
 /// </summary>
-public class ListInventoryHandler(IamsDbContext db, AccessCheckService accessCheck)
+public class ListInventoryHandler(IamsDbContext db, AccessScopeResolver scopeResolver)
 {
     public const int DefaultPageSize = 50;
     public const int MaxPageSize = 200;
@@ -76,13 +78,19 @@ public class ListInventoryHandler(IamsDbContext db, AccessCheckService accessChe
     public async Task<Results<Ok<InventoryListResponse>, ProblemHttpResult>> HandleAsync(
         ListInventoryQuery query, CancellationToken ct)
     {
-        var reachable = (await accessCheck.GetReachableCompanyIdsAsync(ct)).ToArray();
+        var scope = await scopeResolver.ResolveAsync(ct);
+        var locationIds = scope.LocationIds;
+        var locationRestricted = scope.LocationRestricted;
         var page = query.Page ?? 1;
         var pageSize = query.PageSize ?? DefaultPageSize;
         var filter = string.IsNullOrEmpty(query.Filter) ? InventoryStockFilter.All : query.Filter;
         var lowThreshold = query.LowStockThreshold ?? InventoryDefaults.DefaultLowStockThreshold;
 
-        var items = db.InventoryItems.AsNoTracking().Where(i => reachable.Contains(i.CompanyId));
+        var items = db.InventoryItems.AsNoTracking();
+        if (!scope.SystemWide)
+        {
+            items = items.Where(i => i.CompanyId == scope.CompanyId);
+        }
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
@@ -95,11 +103,13 @@ public class ListInventoryHandler(IamsDbContext db, AccessCheckService accessChe
                 (i.Barcode != null && i.Barcode.ToLower().Contains(s)));
         }
 
-        // Aggregate on-hand across all of the item's stock rows (all in the item's own — reachable — company).
+        // Aggregate on-hand across the item's stock rows, narrowed to the caller's assigned Locations for the
+        // location-restricted roles (Admin/SuperAdmin sum every Location).
         var projected = items.Select(i => new
         {
             Item = i,
-            Total = db.StockLevels.Where(sl => sl.InventoryItemId == i.Id)
+            Total = db.StockLevels
+                .Where(sl => sl.InventoryItemId == i.Id && (!locationRestricted || locationIds.Contains(sl.LocationId)))
                 .Sum(sl => (decimal?)sl.QuantityOnHand) ?? 0m
         });
 
