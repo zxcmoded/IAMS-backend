@@ -145,12 +145,24 @@ namespace IAMS.Api.Common.Persistence.Migrations
                 name: "TenantId",
                 table: "Bins");
 
+            // Users.CompanyId is being introduced as NOT NULL with an FK to Companies. Any Users rows that
+            // already exist (e.g. a seeded admin) need a real Companies row to point to before that FK is
+            // added below - Guid.Empty is not a valid Companies.Id, so it would fail the FK add (or worse,
+            // silently pass on an empty table and only blow up later). Bootstrap one deterministically so
+            // the migration is safe whether Users is empty or already has rows.
+            migrationBuilder.Sql(
+                """
+                INSERT INTO "Companies" ("Id", "Name", "IsActive")
+                VALUES ('11111111-1111-1111-1111-111111111111', 'Unassigned', TRUE)
+                ON CONFLICT ("Id") DO NOTHING;
+                """);
+
             migrationBuilder.AddColumn<Guid>(
                 name: "CompanyId",
                 table: "Users",
                 type: "uuid",
                 nullable: false,
-                defaultValue: new Guid("00000000-0000-0000-0000-000000000000"));
+                defaultValue: new Guid("11111111-1111-1111-1111-111111111111"));
 
             migrationBuilder.AddColumn<int>(
                 name: "Role",

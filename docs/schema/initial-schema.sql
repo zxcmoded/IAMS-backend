@@ -1502,7 +1502,16 @@ END $EF$;
 DO $EF$
 BEGIN
     IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260922054045_RemoveTenantAndCompanyConnections') THEN
-    ALTER TABLE "Users" ADD "CompanyId" uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';
+    INSERT INTO "Companies" ("Id", "Name", "IsActive")
+    VALUES ('11111111-1111-1111-1111-111111111111', 'Unassigned', TRUE)
+    ON CONFLICT ("Id") DO NOTHING;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260922054045_RemoveTenantAndCompanyConnections') THEN
+    ALTER TABLE "Users" ADD "CompanyId" uuid NOT NULL DEFAULT '11111111-1111-1111-1111-111111111111';
     END IF;
 END $EF$;
 
