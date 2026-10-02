@@ -127,6 +127,10 @@ public static class DependencyInjection
             .AddJwtBearer(options =>
             {
                 var jwt = config.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
+                // Without this, JwtSecurityTokenHandler's default inbound claim mapping silently rewrites
+                // known short claim names (e.g. "role" -> ClaimTypes.Role) when building the ClaimsPrincipal,
+                // so lookups by the literal IamsClaims constants (CurrentUser, RolePolicies) stop matching.
+                options.MapInboundClaims = false;
                 options.TokenValidationParameters = new TokenValidationParameters
                 {
                     ValidateIssuer = true,

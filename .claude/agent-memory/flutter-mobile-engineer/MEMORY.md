@@ -1,0 +1,1 @@
+- [pubspec name mismatch](pubspec_name_mismatch.md) — IAMS-mobile pubspec.yaml locally says `name: giso` but all imports use `package:iams_mobile/`; breaks analyze/test, not a regression from your change.
